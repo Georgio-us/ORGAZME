@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   Bell,
+  BriefcaseBusiness,
   CalendarDays,
   CalendarClock,
   Check,
@@ -20,8 +21,12 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Search,
+  Settings2,
+  SlidersHorizontal,
   Sparkles,
   StickyNote,
+  TrendingUp,
   Users,
   WalletCards,
   X,
@@ -29,9 +34,11 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
-type Screen = "home" | "clients" | "client";
+type Screen = "home" | "clients" | "client" | "finances" | "directions";
 type ClientsView = "dashboard" | "list";
 type ClientView = "dashboard" | "events";
+type FinanceView = "dashboard" | "list";
+type DirectionsView = "dashboard" | "list";
 type ActionType = "event" | "task" | "meeting" | "contact" | "note";
 type ProposalState = "pending" | "accepted" | "rejected";
 
@@ -56,7 +63,7 @@ type TimelineItem = {
   tone: "blue" | "red" | "green" | "gray";
 };
 
-const clients: Client[] = [
+const seedClients: Client[] = [
   {
     id: "shaped-house",
     name: "Shaped House",
@@ -176,9 +183,20 @@ export default function Home() {
   const [screen, setScreen] = useState<Screen>("home");
   const [clientsView, setClientsView] = useState<ClientsView>("dashboard");
   const [clientView, setClientView] = useState<ClientView>("dashboard");
-  const [selectedClient, setSelectedClient] = useState<Client>(clients[0]);
+  const [financeView, setFinanceView] = useState<FinanceView>("dashboard");
+  const [directionsView, setDirectionsView] =
+    useState<DirectionsView>("dashboard");
+  const [clientRecords, setClientRecords] = useState<Client[]>(seedClients);
+  const [selectedClient, setSelectedClient] = useState<Client>(seedClients[0]);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [actionOpen, setActionOpen] = useState(false);
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [clientMenuOpen, setClientMenuOpen] = useState(false);
+  const [toast, setToast] = useState("");
+  const [completedTasks, setCompletedTasks] = useState<string[]>([]);
+  const [postponedTasks, setPostponedTasks] = useState<string[]>([]);
   const [voiceIntent, setVoiceIntent] = useState<ActionType | null>(null);
   const [voiceState, setVoiceState] = useState<
     "idle" | "recording" | "processing" | "review" | "error"
@@ -202,7 +220,11 @@ export default function Home() {
       ? "Все направления"
       : screen === "clients"
         ? "Все клиенты"
-        : selectedClient.name;
+        : screen === "client"
+          ? selectedClient.name
+          : screen === "finances"
+            ? "Финансы"
+            : "Направления";
 
   const acceptedProposals = useMemo(
     () =>
@@ -220,13 +242,28 @@ export default function Home() {
     if (screen === "clients") {
       setScreen("home");
       setClientsView("dashboard");
+      return;
     }
+    setScreen("home");
+  };
+
+  const showToast = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 1800);
   };
 
   const openClient = (client: Client) => {
     setSelectedClient(client);
     setScreen("client");
     setClientView("dashboard");
+  };
+
+  const addClient = (client: Client) => {
+    setClientRecords((current) => [client, ...current]);
+    setNewClientOpen(false);
+    setSelectedClient(client);
+    setScreen("client");
+    showToast("Клиент создан");
   };
 
   const beginRecording = async (
@@ -340,11 +377,20 @@ export default function Home() {
 
   const applyProposals = () => {
     if (acceptedProposals > 0 && screen === "client") {
+      const contextualTitles: Record<ActionType, string> = {
+        event: "Клиент согласовал обновлённую структуру",
+        task: "Отправить обновлённые данные",
+        meeting: "Провести Zoom на следующей неделе",
+        contact: "Созвон по вопросам хостинга",
+        note: "Сохранить компактную структуру интерфейса",
+      };
       setTimeline((items) => [
         {
           id: `ai-${Date.now()}`,
-          kind: "AI · подтверждено",
-          title: `${acceptedProposals} изменения добавлены`,
+          kind: voiceIntent ? actionLabels[voiceIntent] : "AI · подтверждено",
+          title: voiceIntent
+            ? contextualTitles[voiceIntent]
+            : `${acceptedProposals} изменения добавлены`,
           detail: "Карточка и рабочий контекст обновлены",
           date: "только что",
           tone: "green",
@@ -352,6 +398,11 @@ export default function Home() {
         ...items,
       ]);
     }
+    showToast(
+      acceptedProposals > 0
+        ? `Применено: ${acceptedProposals}`
+        : "Предложения обработаны",
+    );
     setVoiceState("idle");
     setVoiceIntent(null);
     setProposalStates({});
@@ -376,11 +427,19 @@ export default function Home() {
           </div>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button" aria-label="Уведомления">
+          <button
+            className="icon-button"
+            aria-label="Уведомления"
+            onClick={() => setNotificationsOpen(true)}
+          >
             <span className="notification-dot" />
             <Bell size={18} strokeWidth={1.9} />
           </button>
-          <button className="icon-button" aria-label="Меню">
+          <button
+            className="icon-button"
+            aria-label="Меню"
+            onClick={() => setMenuOpen(true)}
+          >
             <MoreHorizontal size={20} />
           </button>
         </div>
@@ -388,12 +447,18 @@ export default function Home() {
 
       <section className="workspace">
         {screen === "home" && (
-          <HomeScreen onClients={() => setScreen("clients")} />
+          <HomeScreen
+            clientCount={clientRecords.length}
+            onClients={() => setScreen("clients")}
+            onFinances={() => setScreen("finances")}
+            onDirections={() => setScreen("directions")}
+          />
         )}
 
         {screen === "clients" && (
           <ClientsScreen
             view={clientsView}
+            clients={clientRecords}
             onViewChange={setClientsView}
             onOpenClient={openClient}
           />
@@ -405,6 +470,35 @@ export default function Home() {
             view={clientView}
             onViewChange={setClientView}
             timeline={timeline}
+            taskCompleted={completedTasks.includes(selectedClient.id)}
+            taskPostponed={postponedTasks.includes(selectedClient.id)}
+            onCompleteTask={() => {
+              setCompletedTasks((items) => [...items, selectedClient.id]);
+              showToast("Задача выполнена");
+            }}
+            onPostponeTask={() => {
+              setPostponedTasks((items) => [...items, selectedClient.id]);
+              showToast("Задача перенесена на 30 июля");
+            }}
+            onOpenEvents={() => setClientView("events")}
+            onOpenMenu={() => setClientMenuOpen(true)}
+            onAction={showToast}
+          />
+        )}
+
+        {screen === "finances" && (
+          <FinanceScreen
+            view={financeView}
+            onViewChange={setFinanceView}
+            onAction={showToast}
+          />
+        )}
+
+        {screen === "directions" && (
+          <DirectionsScreen
+            view={directionsView}
+            onViewChange={setDirectionsView}
+            onAction={showToast}
           />
         )}
       </section>
@@ -443,11 +537,17 @@ export default function Home() {
             )}
         </button>
         </div>
-        <button className="tab-item future-tab">
+        <button
+          className={`tab-item ${screen === "finances" ? "active" : ""}`}
+          onClick={() => setScreen("finances")}
+        >
           <WalletCards size={20} strokeWidth={2} />
           <span>Финансы</span>
         </button>
-        <button className="tab-item future-tab">
+        <button
+          className={`tab-item ${screen === "directions" ? "active" : ""}`}
+          onClick={() => setScreen("directions")}
+        >
           <Layers3 size={20} strokeWidth={2} />
           <span>Проекты</span>
         </button>
@@ -485,7 +585,13 @@ export default function Home() {
                 />
               ))}
               {screen !== "client" && (
-                <button className="action-choice action-choice-wide">
+                <button
+                  className="action-choice action-choice-wide"
+                  onClick={() => {
+                    setActionOpen(false);
+                    setNewClientOpen(true);
+                  }}
+                >
                   <span><Plus size={17} /></span>
                   Новый клиент
                   <ChevronRight size={16} className="choice-chevron" />
@@ -514,6 +620,47 @@ export default function Home() {
           onApply={applyProposals}
         />
       )}
+
+      {newClientOpen && (
+        <NewClientSheet
+          onClose={() => setNewClientOpen(false)}
+          onSave={addClient}
+        />
+      )}
+
+      {notificationsOpen && (
+        <NotificationsSheet
+          onClose={() => setNotificationsOpen(false)}
+          onOpenClient={(clientId) => {
+            const client = clientRecords.find((item) => item.id === clientId);
+            if (client) openClient(client);
+            setNotificationsOpen(false);
+          }}
+        />
+      )}
+
+      {menuOpen && (
+        <MainMenuSheet
+          onClose={() => setMenuOpen(false)}
+          onSelect={(label) => {
+            setMenuOpen(false);
+            showToast(`${label}: демо-раздел открыт`);
+          }}
+        />
+      )}
+
+      {clientMenuOpen && (
+        <ClientMenuSheet
+          client={selectedClient}
+          onClose={() => setClientMenuOpen(false)}
+          onSelect={(label) => {
+            setClientMenuOpen(false);
+            showToast(label);
+          }}
+        />
+      )}
+
+      {toast && <div className="toast-message">{toast}</div>}
     </main>
   );
 }
@@ -536,7 +683,17 @@ function ActionChoice({
   );
 }
 
-function HomeScreen({ onClients }: { onClients: () => void }) {
+function HomeScreen({
+  clientCount,
+  onClients,
+  onFinances,
+  onDirections,
+}: {
+  clientCount: number;
+  onClients: () => void;
+  onFinances: () => void;
+  onDirections: () => void;
+}) {
   return (
     <div className="screen home-screen">
       <div className="screen-intro">
@@ -553,7 +710,7 @@ function HomeScreen({ onClients }: { onClients: () => void }) {
           </div>
           <div>
             <h2>Клиенты</h2>
-            <p>5 активных клиентов</p>
+            <p>{clientCount} клиентов в контексте</p>
           </div>
           <div className="direction-summary">
             <span><i className="summary-dot danger-dot" />1 просрочено</span>
@@ -561,10 +718,10 @@ function HomeScreen({ onClients }: { onClients: () => void }) {
           </div>
         </button>
 
-        <button className="direction-card">
+        <button className="direction-card" onClick={onFinances}>
           <div className="direction-topline">
             <span className="direction-icon finance-icon"><WalletCards size={19} /></span>
-            <span className="soon-chip">Скоро</span>
+            <ChevronRight size={17} className="card-chevron" />
           </div>
           <div>
             <h2>Финансы</h2>
@@ -572,10 +729,10 @@ function HomeScreen({ onClients }: { onClients: () => void }) {
           </div>
         </button>
 
-        <button className="direction-card">
+        <button className="direction-card" onClick={onDirections}>
           <div className="direction-topline">
             <span className="direction-icon projects-icon"><Layers3 size={19} /></span>
-            <span className="soon-chip">Скоро</span>
+            <ChevronRight size={17} className="card-chevron" />
           </div>
           <div>
             <h2>Направления</h2>
@@ -627,12 +784,231 @@ function HomeScreen({ onClients }: { onClients: () => void }) {
   );
 }
 
+function FinanceScreen({
+  view,
+  onViewChange,
+  onAction,
+}: {
+  view: FinanceView;
+  onViewChange: (view: FinanceView) => void;
+  onAction: (message: string) => void;
+}) {
+  const transactions = [
+    { id: 1, title: "Shaped House", meta: "Оплата · июль", value: "+ €4 800" },
+    { id: 2, title: "Figma", meta: "Подписка", value: "− €15" },
+    { id: 3, title: "DomStar", meta: "Ожидается · 2 августа", value: "+ $2 200" },
+    { id: 4, title: "Railway", meta: "Инфраструктура", value: "− $20" },
+  ];
+
+  return (
+    <div className="screen finance-screen">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Направление</span>
+          <h1>Финансы</h1>
+        </div>
+        <ViewToggle
+          active={view}
+          left="dashboard"
+          right="list"
+          onChange={onViewChange}
+        />
+      </div>
+
+      {view === "dashboard" ? (
+        <>
+          <section className="balance-card">
+            <div className="balance-head">
+              <span>Прогноз на август</span>
+              <TrendingUp size={18} />
+            </div>
+            <strong>€8 420</strong>
+            <small>+12% к текущему месяцу</small>
+            <div className="balance-progress"><span /></div>
+          </section>
+          <div className="finance-metrics">
+            <article>
+              <span>Получено</span>
+              <strong>€6 400</strong>
+              <small>3 платежа</small>
+            </article>
+            <article>
+              <span>Ожидается</span>
+              <strong>€3 200</strong>
+              <small>до 5 августа</small>
+            </article>
+          </div>
+          <section className="finance-context-card">
+            <div className="panel-title">
+              <div>
+                <span className="eyebrow">Контекст</span>
+                <h2>Требует решения</h2>
+              </div>
+              <span className="count-pill">2</span>
+            </div>
+            <button
+              className="finance-decision-row"
+              onClick={() => onAction("Бюджет DomStar открыт")}
+            >
+              <span>Согласовать новый бюджет DomStar</span>
+              <ChevronRight size={15} />
+            </button>
+            <button
+              className="finance-decision-row"
+              onClick={() => onAction("Оплата CRETALINA открыта")}
+            >
+              <span>Проверить оплату CRETALINA</span>
+              <ChevronRight size={15} />
+            </button>
+          </section>
+        </>
+      ) : (
+        <div className="transaction-list">
+          <div className="list-summary">
+            <span>Последние операции</span>
+            <strong>{transactions.length}</strong>
+          </div>
+          {transactions.map((transaction) => (
+            <button
+              className="transaction-row"
+              key={transaction.id}
+              onClick={() => onAction(`${transaction.title}: операция открыта`)}
+            >
+              <span className="transaction-icon">
+                <WalletCards size={16} />
+              </span>
+              <span>
+                <strong>{transaction.title}</strong>
+                <small>{transaction.meta}</small>
+              </span>
+              <b>{transaction.value}</b>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DirectionsScreen({
+  view,
+  onViewChange,
+  onAction,
+}: {
+  view: DirectionsView;
+  onViewChange: (view: DirectionsView) => void;
+  onAction: (message: string) => void;
+}) {
+  const directions = [
+    {
+      id: "pbos",
+      name: "ORGAZME",
+      stage: "MVP · активное",
+      progress: 42,
+      next: "Завершить интерактивный прототип",
+      tone: "blue",
+    },
+    {
+      id: "agency",
+      name: "Client Studio",
+      stage: "Рабочее направление",
+      progress: 68,
+      next: "Обновить пакет услуг",
+      tone: "purple",
+    },
+    {
+      id: "research",
+      name: "AI Research",
+      stage: "Исследование",
+      progress: 23,
+      next: "Проверить голосовые сценарии",
+      tone: "green",
+    },
+  ];
+
+  return (
+    <div className="screen directions-screen">
+      <div className="section-heading">
+        <div>
+          <span className="eyebrow">Направление</span>
+          <h1>Проекты</h1>
+        </div>
+        <ViewToggle
+          active={view}
+          left="dashboard"
+          right="list"
+          onChange={onViewChange}
+        />
+      </div>
+
+      {view === "dashboard" ? (
+        <>
+          <div className="metric-grid direction-metrics">
+            <article className="metric-card metric-primary">
+              <span>Активные</span>
+              <strong>3</strong>
+              <small>направления</small>
+            </article>
+            <article className="metric-card">
+              <span>В фокусе</span>
+              <strong>1</strong>
+              <small>ORGAZME</small>
+            </article>
+            <article className="metric-card">
+              <span>Идей</span>
+              <strong>7</strong>
+              <small>в бэклоге</small>
+            </article>
+          </div>
+          <section className="focus-card">
+            <span className="eyebrow">Главный фокус</span>
+            <div className="focus-title">
+              <span className="direction-icon projects-icon">
+                <BriefcaseBusiness size={18} />
+              </span>
+              <div>
+                <h2>ORGAZME</h2>
+                <p>Интерактивный MVP</p>
+              </div>
+            </div>
+            <div className="focus-progress"><span /></div>
+            <strong>Следующее: завершить все интерфейсные сценарии</strong>
+          </section>
+        </>
+      ) : (
+        <div className="direction-project-list">
+          {directions.map((direction) => (
+            <button
+              className="project-row"
+              key={direction.id}
+              onClick={() => onAction(`${direction.name}: направление открыто`)}
+            >
+              <div className={`project-tone ${direction.tone}`} />
+              <div>
+                <strong>{direction.name}</strong>
+                <small>{direction.stage}</small>
+                <p>{direction.next}</p>
+                <span className="project-progress">
+                  <i style={{ width: `${direction.progress}%` }} />
+                </span>
+              </div>
+              <ChevronRight size={15} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClientsScreen({
   view,
+  clients,
   onViewChange,
   onOpenClient,
 }: {
   view: ClientsView;
+  clients: Client[];
   onViewChange: (view: ClientsView) => void;
   onOpenClient: (client: Client) => void;
 }) {
@@ -652,17 +1028,19 @@ function ClientsScreen({
       </div>
 
       {view === "dashboard" ? (
-        <ClientsDashboard onOpenClient={onOpenClient} />
+        <ClientsDashboard clients={clients} onOpenClient={onOpenClient} />
       ) : (
-        <ClientsList onOpenClient={onOpenClient} />
+        <ClientsList clients={clients} onOpenClient={onOpenClient} />
       )}
     </div>
   );
 }
 
 function ClientsDashboard({
+  clients,
   onOpenClient,
 }: {
+  clients: Client[];
   onOpenClient: (client: Client) => void;
 }) {
   return (
@@ -670,8 +1048,8 @@ function ClientsDashboard({
       <div className="metric-grid">
         <article className="metric-card metric-primary">
           <span>Активные</span>
-          <strong>4</strong>
-          <small>из 5 клиентов</small>
+          <strong>{clients.filter((client) => client.category === "Активный").length}</strong>
+          <small>из {clients.length} клиентов</small>
         </article>
         <article className="metric-card">
           <span>Просрочено</span>
@@ -693,7 +1071,14 @@ function ClientsDashboard({
           </div>
           <span className="count-pill">2</span>
         </div>
-        {clients.slice(0, 2).map((client) => (
+        {clients
+          .filter(
+            (client) =>
+              client.attention === "overdue" ||
+              client.attention === "attention",
+          )
+          .slice(0, 2)
+          .map((client) => (
           <button
             key={client.id}
             className="attention-row"
@@ -706,7 +1091,7 @@ function ClientsDashboard({
             </span>
             <span className="attention-time">{client.lastContact}</span>
           </button>
-        ))}
+          ))}
       </section>
 
       <section className="today-panel">
@@ -738,17 +1123,69 @@ function ClientsDashboard({
 }
 
 function ClientsList({
+  clients,
   onOpenClient,
 }: {
+  clients: Client[];
   onOpenClient: (client: Client) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<"attention" | "name">("attention");
+  const filteredClients = clients
+    .filter((client) =>
+      client.name.toLowerCase().includes(query.trim().toLowerCase()),
+    )
+    .filter((client) =>
+      attentionOnly
+        ? client.attention === "overdue" || client.attention === "attention"
+        : true,
+    )
+    .sort((a, b) =>
+      sortBy === "name"
+        ? a.name.localeCompare(b.name, "ru")
+        : attentionRank(a.attention) - attentionRank(b.attention),
+    );
+
   return (
     <div className="client-list">
+      <div className="client-tools">
+        <label className="search-field">
+          <Search size={15} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Найти клиента"
+          />
+          {query && (
+            <button onClick={() => setQuery("")} aria-label="Очистить поиск">
+              <X size={13} />
+            </button>
+          )}
+        </label>
+        <div className="filter-row">
+          <button
+            className={attentionOnly ? "filter-chip active" : "filter-chip"}
+            onClick={() => setAttentionOnly((value) => !value)}
+          >
+            <SlidersHorizontal size={12} />
+            Требуют внимания
+          </button>
+          <button
+            className="filter-chip"
+            onClick={() =>
+              setSortBy((value) => (value === "attention" ? "name" : "attention"))
+            }
+          >
+            {sortBy === "attention" ? "По приоритету" : "По имени"}
+          </button>
+        </div>
+      </div>
       <div className="list-summary">
         <span>Сначала требующие внимания</span>
-        <strong>5 клиентов</strong>
+        <strong>{filteredClients.length} клиентов</strong>
       </div>
-      {clients.map((client) => (
+      {filteredClients.map((client) => (
         <button
           className="client-card"
           key={client.id}
@@ -776,8 +1213,19 @@ function ClientsList({
           </div>
         </button>
       ))}
+      {filteredClients.length === 0 && (
+        <div className="empty-state">
+          <Search size={22} />
+          <strong>Ничего не найдено</strong>
+          <span>Измените запрос или отключите фильтр.</span>
+        </div>
+      )}
     </div>
   );
+}
+
+function attentionRank(attention: Client["attention"]) {
+  return { overdue: 0, attention: 1, active: 2, calm: 3 }[attention];
 }
 
 function ClientScreen({
@@ -785,11 +1233,25 @@ function ClientScreen({
   view,
   onViewChange,
   timeline,
+  taskCompleted,
+  taskPostponed,
+  onCompleteTask,
+  onPostponeTask,
+  onOpenEvents,
+  onOpenMenu,
+  onAction,
 }: {
   client: Client;
   view: ClientView;
   onViewChange: (view: ClientView) => void;
   timeline: TimelineItem[];
+  taskCompleted: boolean;
+  taskPostponed: boolean;
+  onCompleteTask: () => void;
+  onPostponeTask: () => void;
+  onOpenEvents: () => void;
+  onOpenMenu: () => void;
+  onAction: (message: string) => void;
 }) {
   return (
     <div className="screen client-screen">
@@ -802,7 +1264,11 @@ function ClientScreen({
             {client.status}
           </p>
         </div>
-        <button className="more-button" aria-label="Действия клиента">
+        <button
+          className="more-button"
+          aria-label="Действия клиента"
+          onClick={onOpenMenu}
+        >
           <MoreHorizontal size={21} />
         </button>
       </div>
@@ -816,28 +1282,65 @@ function ClientScreen({
       />
 
       {view === "dashboard" ? (
-        <ClientDashboard client={client} />
+        <ClientDashboard
+          client={client}
+          taskCompleted={taskCompleted}
+          taskPostponed={taskPostponed}
+          onCompleteTask={onCompleteTask}
+          onPostponeTask={onPostponeTask}
+          onOpenEvents={onOpenEvents}
+        />
       ) : (
-        <ClientTimeline timeline={timeline} />
+        <ClientTimeline timeline={timeline} onAction={onAction} />
       )}
     </div>
   );
 }
 
-function ClientDashboard({ client }: { client: Client }) {
+function ClientDashboard({
+  client,
+  taskCompleted,
+  taskPostponed,
+  onCompleteTask,
+  onPostponeTask,
+  onOpenEvents,
+}: {
+  client: Client;
+  taskCompleted: boolean;
+  taskPostponed: boolean;
+  onCompleteTask: () => void;
+  onPostponeTask: () => void;
+  onOpenEvents: () => void;
+}) {
   return (
     <div className="client-dashboard">
-      <section className="current-task-card">
+      <section
+        className={`current-task-card ${taskCompleted ? "task-completed" : ""}`}
+      >
         <div className="task-label">
           <span>Текущая задача</span>
-          <span className="overdue-pill">Просрочено 2 дня</span>
+          <span className={taskCompleted ? "complete-pill" : "overdue-pill"}>
+            {taskCompleted
+              ? "Выполнено"
+              : taskPostponed
+                ? "Перенесено"
+                : "Просрочено 2 дня"}
+          </span>
         </div>
         <h2>{client.nextAction}</h2>
-        <p>Срок: 26 июля · 12:00</p>
-        <div className="task-actions">
-          <button>Выполнено</button>
-          <button>Перенести</button>
-        </div>
+        <p>
+          {taskCompleted
+            ? "Завершено только что"
+            : taskPostponed
+              ? "Новый срок: 30 июля · 12:00"
+              : "Срок: 26 июля · 12:00"}
+        </p>
+        {!taskCompleted && (
+          <div className="task-actions">
+            <button onClick={onCompleteTask}>Выполнено</button>
+            <button onClick={onPostponeTask}>Перенести</button>
+          </div>
+        )}
       </section>
 
       <div className="info-grid">
@@ -870,13 +1373,19 @@ function ClientDashboard({ client }: { client: Client }) {
           Клиент активен. Последний контакт был четыре дня назад. Есть
           просроченная задача и согласован следующий созвон.
         </p>
-        <button>Открыть события →</button>
+        <button onClick={onOpenEvents}>Открыть события →</button>
       </section>
     </div>
   );
 }
 
-function ClientTimeline({ timeline }: { timeline: TimelineItem[] }) {
+function ClientTimeline({
+  timeline,
+  onAction,
+}: {
+  timeline: TimelineItem[];
+  onAction: (message: string) => void;
+}) {
   return (
     <div className="timeline-list">
       <div className="list-summary">
@@ -894,7 +1403,12 @@ function ClientTimeline({ timeline }: { timeline: TimelineItem[] }) {
             <h2>{item.title}</h2>
             <p>{item.detail}</p>
           </div>
-          <button aria-label="Редактировать событие">···</button>
+          <button
+            aria-label="Редактировать событие"
+            onClick={() => onAction(`Редактирование: ${item.title}`)}
+          >
+            <MoreHorizontal size={16} />
+          </button>
         </article>
       ))}
     </div>
@@ -943,6 +1457,207 @@ function ViewToggle<
   );
 }
 
+function NewClientSheet({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: (client: Client) => void;
+}) {
+  const [name, setName] = useState("");
+  const [category, setCategory] =
+    useState<Client["category"]>("Потенциальный");
+  const [nextAction, setNextAction] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const save = () => {
+    if (!name.trim()) return;
+    onSave({
+      id: `client-${Date.now()}`,
+      name: name.trim(),
+      category,
+      attention: nextAction.trim() ? "active" : "calm",
+      status: category === "Активный" ? "В работе" : "Первичный контакт",
+      nextAction: nextAction.trim() || "Определить следующее действие",
+      lastContact: "только что",
+      lastContactDays: 0,
+      amount: amount.trim() || "Не указано",
+    });
+  };
+
+  return (
+    <div className="overlay">
+      <section className="bottom-sheet form-sheet">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Клиенты</span>
+            <h2>Новый клиент</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="form-stack">
+          <label>
+            <span>Имя или компания</span>
+            <input
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Например, Studio North"
+            />
+          </label>
+          <div>
+            <span className="form-label">Статус</span>
+            <div className="form-segment">
+              {(["Потенциальный", "Активный"] as const).map((value) => (
+                <button
+                  className={category === value ? "active" : ""}
+                  key={value}
+                  onClick={() => setCategory(value)}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label>
+            <span>Следующее действие</span>
+            <input
+              value={nextAction}
+              onChange={(event) => setNextAction(event.target.value)}
+              placeholder="Можно добавить позже"
+            />
+          </label>
+          <label>
+            <span>Финансовый контекст</span>
+            <input
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              placeholder="Например, €2 000"
+            />
+          </label>
+        </div>
+        <button className="primary-button" disabled={!name.trim()} onClick={save}>
+          Создать клиента
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function NotificationsSheet({
+  onClose,
+  onOpenClient,
+}: {
+  onClose: () => void;
+  onOpenClient: (clientId: string) => void;
+}) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Сегодня</span>
+            <h2>Уведомления</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="notification-list">
+          <button onClick={() => onOpenClient("shaped-house")}>
+            <span className="agenda-icon agenda-danger"><CircleAlert size={16} /></span>
+            <span><strong>Задача просрочена</strong><small>Shaped House · 2 дня</small></span>
+            <ChevronRight size={15} />
+          </button>
+          <button onClick={() => onOpenClient("irina")}>
+            <span className="agenda-icon agenda-blue"><CalendarClock size={16} /></span>
+            <span><strong>Встреча сегодня</strong><small>Ирина · 19:00</small></span>
+            <ChevronRight size={15} />
+          </button>
+          <button onClick={() => onOpenClient("domstar")}>
+            <span className="agenda-icon agenda-purple"><Sparkles size={16} /></span>
+            <span><strong>AI ждёт подтверждения</strong><small>DomStar · новое предложение</small></span>
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MainMenuSheet({
+  onClose,
+  onSelect,
+}: {
+  onClose: () => void;
+  onSelect: (label: string) => void;
+}) {
+  const items = [
+    { label: "Настройки интерфейса", icon: Settings2 },
+    { label: "Экспорт данных", icon: BriefcaseBusiness },
+    { label: "О приложении", icon: CircleAlert },
+  ];
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div><span className="eyebrow">ORGAZME</span><h2>Меню</h2></div>
+          <button className="close-button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="action-grid">
+          {items.map(({ label, icon: Icon }) => (
+            <button className="action-choice" key={label} onClick={() => onSelect(label)}>
+              <span><Icon size={17} /></span>
+              {label}
+              <ChevronRight size={16} className="choice-chevron" />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ClientMenuSheet({
+  client,
+  onClose,
+  onSelect,
+}: {
+  client: Client;
+  onClose: () => void;
+  onSelect: (label: string) => void;
+}) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div><span className="eyebrow">Клиент</span><h2>{client.name}</h2></div>
+          <button className="close-button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="action-grid">
+          {["Редактирование открыто", "Уровень внимания изменён", "Карточка скопирована"].map(
+            (label, index) => (
+              <button className="action-choice" key={label} onClick={() => onSelect(label)}>
+                <span>
+                  {index === 0 ? <Pencil size={17} /> : index === 1 ? <CircleAlert size={17} /> : <Contact size={17} />}
+                </span>
+                {label.replace(" открыто", "").replace(" изменён", "").replace(" скопирована", "")}
+                <ChevronRight size={16} className="choice-chevron" />
+              </button>
+            ),
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function VoiceOverlay({
   state,
   seconds,
@@ -968,6 +1683,9 @@ function VoiceOverlay({
   onRetry: () => void;
   onApply: () => void;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editedTitles, setEditedTitles] = useState<Record<string, string>>({});
+
   if (state === "review") {
     const contextualCards: Record<
       ActionType,
@@ -1043,7 +1761,25 @@ function VoiceOverlay({
                 >
                   <div>
                     <span className="proposal-type">{card.type}</span>
-                    <h3>{card.title}</h3>
+                    {editingId === card.id ? (
+                      <input
+                        className="proposal-edit-input"
+                        autoFocus
+                        value={editedTitles[card.id] ?? card.title}
+                        onChange={(event) =>
+                          setEditedTitles((current) => ({
+                            ...current,
+                            [card.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={() => setEditingId(null)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") setEditingId(null);
+                        }}
+                      />
+                    ) : (
+                      <h3>{editedTitles[card.id] ?? card.title}</h3>
+                    )}
                     <p>{card.detail}</p>
                   </div>
                   <div className="proposal-actions">
@@ -1057,6 +1793,7 @@ function VoiceOverlay({
                     <button
                       className="edit"
                       aria-label="Изменить предложение"
+                      onClick={() => setEditingId(card.id)}
                     >
                       <Pencil size={12} />
                     </button>
