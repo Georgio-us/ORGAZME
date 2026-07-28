@@ -244,6 +244,65 @@ h1 {
 .danger-dot { background: #ff8a82; }
 .warn-dot { background: #ffcc72; }
 
+.home-agenda {
+  margin-top: 10px;
+  overflow: hidden;
+  border: .5px solid var(--separator);
+  border-radius: 18px;
+  background: var(--surface);
+}
+.home-agenda-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 13px 9px;
+}
+.home-agenda-head h2 {
+  margin-top: 2px;
+  font-size: 17px;
+  font-weight: 710;
+  letter-spacing: -.02em;
+}
+.agenda-count {
+  display: grid;
+  min-width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--secondary);
+  font-size: 9px;
+  font-weight: 700;
+}
+.agenda-row {
+  display: grid;
+  width: 100%;
+  min-height: 54px;
+  grid-template-columns: 32px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border: 0;
+  border-top: .5px solid var(--separator);
+  background: transparent;
+  text-align: left;
+}
+.agenda-row:active { background: var(--surface-soft); }
+.agenda-row > svg { color: var(--tertiary); }
+.agenda-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+}
+.agenda-danger { background: rgba(255,59,48,.1); color: var(--red); }
+.agenda-blue { background: var(--blue-soft); color: var(--blue); }
+.agenda-purple { background: rgba(118,86,216,.11); color: var(--purple); }
+.agenda-copy strong, .agenda-copy small { display: block; }
+.agenda-copy strong { font-size: 11px; font-weight: 650; }
+.agenda-copy small { margin-top: 2px; color: var(--secondary); font-size: 9px; }
+
 .view-toggle {
   display: flex;
   padding: 2px;
@@ -589,6 +648,12 @@ h1 {
   letter-spacing: -.025em;
 }
 .close-button { background: rgba(118,118,128,.12); color: var(--secondary); }
+.sheet-description {
+  margin-top: 8px;
+  color: var(--secondary);
+  font-size: 10px;
+  line-height: 1.4;
+}
 .action-grid {
   display: grid;
   gap: 7px;
@@ -690,6 +755,29 @@ h1 {
 .voice-time { margin: 7px 0 13px; font-variant-numeric: tabular-nums; font-size: 12px; letter-spacing: .08em; }
 .voice-modal p { max-width: 280px; color: rgba(255,255,255,.56); font-size: 11px; line-height: 1.45; }
 .voice-modal button { margin-top: 25px; background: rgba(255,255,255,.1); color: white; }
+.recording-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+.recording-actions button {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  padding: 8px 13px;
+}
+.recording-actions .voice-stop-button {
+  background: white;
+  color: var(--text);
+}
+.release-hint {
+  margin-top: 24px;
+  color: rgba(255,255,255,.42);
+  font-size: 9px;
+}
 .processing-mark {
   display: grid;
   width: 74px;

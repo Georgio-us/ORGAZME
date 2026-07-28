@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   Bell,
   CalendarDays,
+  CalendarClock,
   Check,
   CheckSquare2,
   ChevronRight,
+  CircleAlert,
   CircleStop,
   Clock3,
   Contact,
@@ -177,8 +179,7 @@ export default function Home() {
   const [selectedClient, setSelectedClient] = useState<Client>(clients[0]);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [actionOpen, setActionOpen] = useState(false);
-  const [draftType, setDraftType] = useState<ActionType | null>(null);
-  const [draftText, setDraftText] = useState("");
+  const [voiceIntent, setVoiceIntent] = useState<ActionType | null>(null);
   const [voiceState, setVoiceState] = useState<
     "idle" | "recording" | "processing" | "review" | "error"
   >("idle");
@@ -228,32 +229,12 @@ export default function Home() {
     setClientView("dashboard");
   };
 
-  const openTypedAction = (type: ActionType) => {
-    setActionOpen(false);
-    setDraftType(type);
-    setDraftText("");
-  };
-
-  const saveTypedAction = () => {
-    if (!draftType || !draftText.trim()) return;
-    const newItem: TimelineItem = {
-      id: `manual-${Date.now()}`,
-      kind: actionLabels[draftType],
-      title: draftText.trim(),
-      detail:
-        screen === "client"
-          ? `Добавлено в контекст: ${selectedClient.name}`
-          : `Контекст: ${scopeLabel}`,
-      date: "только что",
-      tone: draftType === "task" ? "red" : "blue",
-    };
-    if (screen === "client") setTimeline((items) => [newItem, ...items]);
-    setDraftType(null);
-    setDraftText("");
-  };
-
-  const startRecording = async () => {
-    longPressTriggered.current = true;
+  const beginRecording = async (
+    intent: ActionType | null,
+    requirePointerHold: boolean,
+  ) => {
+    if (requirePointerHold) longPressTriggered.current = true;
+    setVoiceIntent(intent);
     setActionOpen(false);
     setVoiceError("");
     setRecordingSeconds(0);
@@ -262,9 +243,10 @@ export default function Home() {
         throw new Error("Запись голоса не поддерживается этим браузером.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!pointerHeld.current) {
+      if (requirePointerHold && !pointerHeld.current) {
         stream.getTracks().forEach((track) => track.stop());
         setVoiceState("idle");
+        setVoiceIntent(null);
         return;
       }
       mediaStream.current = stream;
@@ -288,6 +270,12 @@ export default function Home() {
       );
       setVoiceState("error");
     }
+  };
+
+  const startGeneralRecording = () => beginRecording(null, true);
+
+  const startContextualRecording = (type: ActionType) => {
+    void beginRecording(type, false);
   };
 
   const stopRecording = () => {
@@ -315,7 +303,7 @@ export default function Home() {
   const handleActionPointerDown = () => {
     pointerHeld.current = true;
     longPressTriggered.current = false;
-    holdTimer.current = setTimeout(startRecording, 420);
+    holdTimer.current = setTimeout(startGeneralRecording, 420);
   };
 
   const handleActionPointerUp = () => {
@@ -343,6 +331,7 @@ export default function Home() {
     if (mediaRecorder.current?.state !== "inactive") mediaRecorder.current?.stop();
     mediaStream.current?.getTracks().forEach((track) => track.stop());
     setVoiceState("idle");
+    setVoiceIntent(null);
   };
 
   const setProposal = (id: string, state: ProposalState) => {
@@ -364,6 +353,7 @@ export default function Home() {
       ]);
     }
     setVoiceState("idle");
+    setVoiceIntent(null);
     setProposalStates({});
   };
 
@@ -483,12 +473,15 @@ export default function Home() {
                 <X size={18} />
               </button>
             </div>
+            <p className="sheet-description">
+              Выберите тип — голосовая запись начнётся сразу.
+            </p>
             <div className="action-grid">
               {(Object.keys(actionLabels) as ActionType[]).map((type) => (
                 <ActionChoice
                   key={type}
                   type={type}
-                  onClick={() => openTypedAction(type)}
+                  onClick={() => startContextualRecording(type)}
                 />
               ))}
               {screen !== "client" && (
@@ -503,62 +496,21 @@ export default function Home() {
         </div>
       )}
 
-      {draftType && (
-        <div className="overlay">
-          <section className="bottom-sheet draft-sheet">
-            <div className="sheet-handle" />
-            <div className="sheet-heading">
-              <div>
-                <span className="eyebrow">{scopeLabel}</span>
-                <h2>Новая {actionLabels[draftType].toLowerCase()}</h2>
-              </div>
-              <button
-                className="close-button"
-                onClick={() => setDraftType(null)}
-                aria-label="Закрыть"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <label className="field-label" htmlFor="draft-input">
-              Что нужно зафиксировать?
-            </label>
-            <textarea
-              id="draft-input"
-              autoFocus
-              value={draftText}
-              onChange={(event) => setDraftText(event.target.value)}
-              placeholder={
-                draftType === "task"
-                  ? "Например: отправить отчёт завтра в 12:00"
-                  : "Опишите коротко или используйте диктовку клавиатуры"
-              }
-            />
-            <div className="draft-meta">
-              <button className="meta-chip">Сегодня</button>
-              <button className="meta-chip">Без приоритета</button>
-            </div>
-            <button
-              className="primary-button"
-              disabled={!draftText.trim()}
-              onClick={saveTypedAction}
-            >
-              Сохранить
-            </button>
-          </section>
-        </div>
-      )}
-
       {voiceState !== "idle" && (
         <VoiceOverlay
           state={voiceState}
           seconds={recordingSeconds}
           error={voiceError}
           scope={scopeLabel}
+          intent={voiceIntent}
           proposals={proposalStates}
           onProposal={setProposal}
           onCancel={cancelRecording}
-          onRetry={() => setVoiceState("idle")}
+          onStop={stopRecording}
+          onRetry={() => {
+            setVoiceState("idle");
+            setVoiceIntent(null);
+          }}
           onApply={applyProposals}
         />
       )}
@@ -631,6 +583,46 @@ function HomeScreen({ onClients }: { onClients: () => void }) {
           </div>
         </button>
       </div>
+
+      <section className="home-agenda">
+        <div className="home-agenda-head">
+          <div>
+            <span className="eyebrow">Общий контекст</span>
+            <h2>Сейчас</h2>
+          </div>
+          <span className="agenda-count">3</span>
+        </div>
+        <button className="agenda-row" onClick={onClients}>
+          <span className="agenda-icon agenda-danger">
+            <CircleAlert size={16} />
+          </span>
+          <span className="agenda-copy">
+            <strong>Отправить обновлённый отчёт</strong>
+            <small>Shaped House · просрочено на 2 дня</small>
+          </span>
+          <ChevronRight size={15} />
+        </button>
+        <button className="agenda-row" onClick={onClients}>
+          <span className="agenda-icon agenda-blue">
+            <CalendarClock size={16} />
+          </span>
+          <span className="agenda-copy">
+            <strong>Zoom с Ириной</strong>
+            <small>Сегодня · 19:00</small>
+          </span>
+          <ChevronRight size={15} />
+        </button>
+        <button className="agenda-row" onClick={onClients}>
+          <span className="agenda-icon agenda-purple">
+            <Sparkles size={16} />
+          </span>
+          <span className="agenda-copy">
+            <strong>Проверить новое предложение AI</strong>
+            <small>DomStar · контекст клиента</small>
+          </span>
+          <ChevronRight size={15} />
+        </button>
+      </section>
     </div>
   );
 }
@@ -956,9 +948,11 @@ function VoiceOverlay({
   seconds,
   error,
   scope,
+  intent,
   proposals,
   onProposal,
   onCancel,
+  onStop,
   onRetry,
   onApply,
 }: {
@@ -966,40 +960,70 @@ function VoiceOverlay({
   seconds: number;
   error: string;
   scope: string;
+  intent: ActionType | null;
   proposals: Record<string, ProposalState>;
   onProposal: (id: string, state: ProposalState) => void;
   onCancel: () => void;
+  onStop: () => void;
   onRetry: () => void;
   onApply: () => void;
 }) {
   if (state === "review") {
-    const cards = [
-      {
-        id: "contact",
-        type: "Контакт",
-        title: "Созвон по вопросам хостинга",
-        detail: "Вчера · Shaped House",
+    const contextualCards: Record<
+      ActionType,
+      { id: string; type: string; title: string; detail: string }
+    > = {
+      event: {
+        id: "event",
+        type: "Событие",
+        title: "Клиент согласовал обновлённую структуру",
+        detail: `Сегодня · ${scope}`,
       },
-      {
+      task: {
         id: "task",
         type: "Задача",
         title: "Отправить обновлённые данные",
         detail: "Завтра · 12:00",
       },
-      {
+      meeting: {
         id: "meeting",
         type: "Встреча",
         title: "Провести Zoom на следующей неделе",
         detail: "Нужно уточнить точную дату",
       },
+      contact: {
+        id: "contact",
+        type: "Контакт",
+        title: "Созвон по вопросам хостинга",
+        detail: `Сегодня · ${scope}`,
+      },
+      note: {
+        id: "note",
+        type: "Заметка",
+        title: "Сохранить компактную структуру интерфейса",
+        detail: `Без срока · ${scope}`,
+      },
+    };
+    const generalCards = [
+      contextualCards.contact,
+      contextualCards.task,
+      contextualCards.meeting,
     ];
+    const cards = intent ? [contextualCards[intent]] : generalCards;
+    const transcript = intent
+      ? intent === "task"
+        ? "Завтра в двенадцать отправить клиенту обновлённые данные."
+        : `Зафиксировать ${actionLabels[intent].toLowerCase()} в контексте ${scope}.`
+      : "Вчера созванивались по хостингу. Завтра в двенадцать нужно отправить данные и на следующей неделе провести Zoom.";
     return (
       <div className="overlay voice-overlay">
         <section className="review-sheet">
           <div className="review-head">
             <div>
-              <span className="eyebrow">AI-разбор · {scope}</span>
-              <h2>Проверьте предложения</h2>
+              <span className="eyebrow">
+                {intent ? actionLabels[intent] : "Общий AI-разбор"} · {scope}
+              </span>
+              <h2>{intent ? "Проверьте запись" : "Проверьте предложения"}</h2>
             </div>
             <button className="close-button" onClick={onRetry}>
               <X size={18} />
@@ -1007,10 +1031,7 @@ function VoiceOverlay({
           </div>
           <div className="transcript-preview">
             <span>Транскрипция</span>
-            <p>
-              «Вчера созванивались по хостингу. Завтра в двенадцать нужно
-              отправить данные и на следующей неделе провести Zoom».
-            </p>
+            <p>«{transcript}»</p>
           </div>
           <div className="proposal-list">
             {cards.map((card) => {
@@ -1068,7 +1089,9 @@ function VoiceOverlay({
 
   return (
     <div className="voice-modal">
-      <span className="eyebrow">{scope}</span>
+      <span className="eyebrow">
+        {intent ? actionLabels[intent] : "Общий голосовой ввод"} · {scope}
+      </span>
       {state === "recording" && (
         <>
           <div className="voice-orb">
@@ -1078,15 +1101,33 @@ function VoiceOverlay({
           <strong className="voice-time">
             00:{String(seconds).padStart(2, "0")}
           </strong>
-          <p>Отпустите кнопку, чтобы завершить.</p>
-          <button onClick={onCancel}>Отменить</button>
+          <p>
+            {intent
+              ? `Расскажите, что нужно зафиксировать как ${actionLabels[intent].toLowerCase()}.`
+              : "Говорите свободно. AI самостоятельно определит типы действий."}
+          </p>
+          {intent ? (
+            <div className="recording-actions">
+              <button className="voice-stop-button" onClick={onStop}>
+                <CircleStop size={16} fill="currentColor" />
+                Завершить
+              </button>
+              <button onClick={onCancel}>Отменить</button>
+            </div>
+          ) : (
+            <span className="release-hint">Отпустите кнопку для завершения</span>
+          )}
         </>
       )}
       {state === "processing" && (
         <>
           <div className="processing-mark">✦</div>
-          <h2>Разбираю событие</h2>
-          <p>Транскрипция и подготовка отдельных предложений.</p>
+          <h2>{intent ? "Подготавливаю запись" : "Разбираю голосовое"}</h2>
+          <p>
+            {intent
+              ? `Транскрипция и проверка типа «${actionLabels[intent]}».`
+              : "Транскрипция и разделение на отдельные предложения."}
+          </p>
           <div className="processing-line">
             <span />
           </div>
