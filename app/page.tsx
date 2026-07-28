@@ -1,5 +1,30 @@
 "use client";
 
+import {
+  ArrowLeft,
+  Bell,
+  CalendarDays,
+  Check,
+  CheckSquare2,
+  ChevronRight,
+  CircleStop,
+  Clock3,
+  Contact,
+  House,
+  LayoutDashboard,
+  Layers3,
+  List,
+  Mic,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Sparkles,
+  StickyNote,
+  Users,
+  WalletCards,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 type Screen = "home" | "clients" | "client";
@@ -130,12 +155,12 @@ const actionLabels: Record<ActionType, string> = {
   note: "Заметка",
 };
 
-const actionIcons: Record<ActionType, string> = {
-  event: "✦",
-  task: "✓",
-  meeting: "◷",
-  contact: "↗",
-  note: "≡",
+const actionIcons: Record<ActionType, LucideIcon> = {
+  event: Sparkles,
+  task: CheckSquare2,
+  meeting: CalendarDays,
+  contact: Contact,
+  note: StickyNote,
 };
 
 const indicatorLabels = {
@@ -166,6 +191,7 @@ export default function Home() {
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const longPressTriggered = useRef(false);
+  const pointerHeld = useRef(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const mediaStream = useRef<MediaStream | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -236,6 +262,11 @@ export default function Home() {
         throw new Error("Запись голоса не поддерживается этим браузером.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!pointerHeld.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        setVoiceState("idle");
+        return;
+      }
       mediaStream.current = stream;
       const recorder = new MediaRecorder(stream);
       audioChunks.current = [];
@@ -282,11 +313,13 @@ export default function Home() {
   };
 
   const handleActionPointerDown = () => {
+    pointerHeld.current = true;
     longPressTriggered.current = false;
     holdTimer.current = setTimeout(startRecording, 420);
   };
 
   const handleActionPointerUp = () => {
+    pointerHeld.current = false;
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
       holdTimer.current = null;
@@ -296,6 +329,13 @@ export default function Home() {
       return;
     }
     setActionOpen(true);
+  };
+
+  const handleActionPointerCancel = () => {
+    pointerHeld.current = false;
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    if (longPressTriggered.current) stopRecording();
   };
 
   const cancelRecording = () => {
@@ -333,10 +373,12 @@ export default function Home() {
         <div className="topbar-left">
           {screen !== "home" ? (
             <button className="icon-button" onClick={goBack} aria-label="Назад">
-              ←
+              <ArrowLeft size={18} strokeWidth={2.2} />
             </button>
           ) : (
-            <span className="brand-mark">O</span>
+            <span className="brand-mark">
+              <span />
+            </span>
           )}
           <div>
             <strong>ORGAZME</strong>
@@ -346,10 +388,10 @@ export default function Home() {
         <div className="topbar-actions">
           <button className="icon-button" aria-label="Уведомления">
             <span className="notification-dot" />
-            ◌
+            <Bell size={18} strokeWidth={1.9} />
           </button>
           <button className="icon-button" aria-label="Меню">
-            ···
+            <MoreHorizontal size={20} />
           </button>
         </div>
       </header>
@@ -377,20 +419,49 @@ export default function Home() {
         )}
       </section>
 
-      <div className="action-dock">
-        <span className="action-hint">Нажать — выбрать</span>
+      <nav className="tabbar" aria-label="Основная навигация">
+        <button
+          className={`tab-item ${screen === "home" ? "active" : ""}`}
+          onClick={() => setScreen("home")}
+        >
+          <House size={20} strokeWidth={2} />
+          <span>Главная</span>
+        </button>
+        <button
+          className={`tab-item ${screen === "clients" || screen === "client" ? "active" : ""}`}
+          onClick={() => setScreen("clients")}
+        >
+          <Users size={20} strokeWidth={2} />
+          <span>Клиенты</span>
+        </button>
+        <div className="action-slot">
+          <span className="hold-label">
+            <Mic size={10} /> удержать
+          </span>
         <button
           className={`action-button ${voiceState === "recording" ? "is-recording" : ""}`}
           onPointerDown={handleActionPointerDown}
           onPointerUp={handleActionPointerUp}
-          onPointerCancel={handleActionPointerUp}
+          onPointerCancel={handleActionPointerCancel}
           onContextMenu={(event) => event.preventDefault()}
           aria-label="Действие: нажать для выбора, удерживать для записи"
         >
-          <span>{voiceState === "recording" ? "■" : "＋"}</span>
+            {voiceState === "recording" ? (
+              <CircleStop size={24} fill="currentColor" />
+            ) : (
+              <Plus size={27} strokeWidth={2.2} />
+            )}
         </button>
-        <span className="action-hint">Зажать — голос</span>
-      </div>
+        </div>
+        <button className="tab-item future-tab">
+          <WalletCards size={20} strokeWidth={2} />
+          <span>Финансы</span>
+        </button>
+        <button className="tab-item future-tab">
+          <Layers3 size={20} strokeWidth={2} />
+          <span>Проекты</span>
+        </button>
+      </nav>
 
       {actionOpen && (
         <div className="overlay" onClick={() => setActionOpen(false)}>
@@ -409,24 +480,22 @@ export default function Home() {
                 onClick={() => setActionOpen(false)}
                 aria-label="Закрыть"
               >
-                ×
+                <X size={18} />
               </button>
             </div>
             <div className="action-grid">
               {(Object.keys(actionLabels) as ActionType[]).map((type) => (
-                <button
+                <ActionChoice
                   key={type}
-                  className="action-choice"
+                  type={type}
                   onClick={() => openTypedAction(type)}
-                >
-                  <span>{actionIcons[type]}</span>
-                  {actionLabels[type]}
-                </button>
+                />
               ))}
               {screen !== "client" && (
                 <button className="action-choice action-choice-wide">
-                  <span>＋</span>
+                  <span><Plus size={17} /></span>
                   Новый клиент
+                  <ChevronRight size={16} className="choice-chevron" />
                 </button>
               )}
             </div>
@@ -448,7 +517,7 @@ export default function Home() {
                 onClick={() => setDraftType(null)}
                 aria-label="Закрыть"
               >
-                ×
+                <X size={18} />
               </button>
             </div>
             <label className="field-label" htmlFor="draft-input">
@@ -497,56 +566,69 @@ export default function Home() {
   );
 }
 
+function ActionChoice({
+  type,
+  onClick,
+}: {
+  type: ActionType;
+  onClick: () => void;
+}) {
+  const Icon = actionIcons[type];
+
+  return (
+    <button className="action-choice" onClick={onClick}>
+      <span><Icon size={17} strokeWidth={2} /></span>
+      {actionLabels[type]}
+      <ChevronRight size={16} className="choice-chevron" />
+    </button>
+  );
+}
+
 function HomeScreen({ onClients }: { onClients: () => void }) {
   return (
     <div className="screen home-screen">
       <div className="screen-intro">
-        <span className="eyebrow">Вторник · 28 июля</span>
-        <h1>Состояние бизнеса</h1>
-        <p>Выберите направление или зажмите кнопку для общей записи.</p>
+        <span className="eyebrow">Вторник, 28 июля</span>
+        <h1>Добрый день</h1>
+        <p>Вот что сейчас происходит в вашем бизнесе.</p>
       </div>
 
       <div className="direction-list">
         <button className="direction-card clients-card" onClick={onClients}>
           <div className="direction-topline">
-            <span className="direction-index">01</span>
-            <span className="direction-arrow">↗</span>
+            <span className="direction-icon"><Users size={19} /></span>
+            <ChevronRight size={18} className="direction-arrow" />
           </div>
           <div>
             <h2>Клиенты</h2>
-            <p>5 клиентов · 2 требуют внимания</p>
+            <p>5 активных клиентов</p>
           </div>
-          <div className="mini-status">
-            <span className="status-bar status-bar-danger" />
-            <span className="status-bar status-bar-warn" />
-            <span className="status-bar status-bar-ok" />
-            <span className="status-bar status-bar-ok" />
-            <span className="status-bar" />
+          <div className="direction-summary">
+            <span><i className="summary-dot danger-dot" />1 просрочено</span>
+            <span><i className="summary-dot warn-dot" />1 ждёт внимания</span>
           </div>
         </button>
 
         <button className="direction-card">
           <div className="direction-topline">
-            <span className="direction-index">02</span>
-            <span className="direction-arrow">↗</span>
+            <span className="direction-icon finance-icon"><WalletCards size={19} /></span>
+            <span className="soon-chip">Скоро</span>
           </div>
           <div>
             <h2>Финансы</h2>
             <p>Факт · план · возможности</p>
           </div>
-          <span className="direction-badge">Скоро</span>
         </button>
 
         <button className="direction-card">
           <div className="direction-topline">
-            <span className="direction-index">03</span>
-            <span className="direction-arrow">↗</span>
+            <span className="direction-icon projects-icon"><Layers3 size={19} /></span>
+            <span className="soon-chip">Скоро</span>
           </div>
           <div>
             <h2>Направления</h2>
             <p>Проекты, развитие и идеи</p>
           </div>
-          <span className="direction-badge">Скоро</span>
         </button>
       </div>
     </div>
@@ -729,7 +811,7 @@ function ClientScreen({
           </p>
         </div>
         <button className="more-button" aria-label="Действия клиента">
-          ···
+          <MoreHorizontal size={21} />
         </button>
       </div>
 
@@ -854,12 +936,15 @@ function ViewToggle<
         className={active === left ? "active" : ""}
         onClick={() => onChange(left)}
       >
+        {left === "dashboard" && <LayoutDashboard size={13} />}
         {labels[left]}
       </button>
       <button
         className={active === right ? "active" : ""}
         onClick={() => onChange(right)}
       >
+        {right === "list" && <List size={13} />}
+        {right === "events" && <Clock3 size={13} />}
         {labels[right]}
       </button>
     </div>
@@ -917,7 +1002,7 @@ function VoiceOverlay({
               <h2>Проверьте предложения</h2>
             </div>
             <button className="close-button" onClick={onRetry}>
-              ×
+              <X size={18} />
             </button>
           </div>
           <div className="transcript-preview">
@@ -946,20 +1031,20 @@ function VoiceOverlay({
                       onClick={() => onProposal(card.id, "rejected")}
                       aria-label="Отклонить"
                     >
-                      ×
+                      <X size={14} />
                     </button>
                     <button
                       className="edit"
                       aria-label="Изменить предложение"
                     >
-                      ✎
+                      <Pencil size={12} />
                     </button>
                     <button
                       className="accept"
                       onClick={() => onProposal(card.id, "accepted")}
                       aria-label="Подтвердить"
                     >
-                      ✓
+                      <Check size={14} />
                     </button>
                   </div>
                 </article>
