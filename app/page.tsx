@@ -191,6 +191,7 @@ type ContextRecord = Record<string, unknown>;
 
 type ClientFinance = {
   currency: string;
+  contracted: number;
   received: number;
   outstanding: number;
   expected: number;
@@ -255,6 +256,9 @@ function getClientFinance(client: Client): ClientFinance {
   );
   return {
     currency,
+    contracted:
+      asNumber(financial.contractedOrEarned) ||
+      asNumber(financial.contractValue),
     received: asNumber(financial.received),
     outstanding,
     expected: asNumber(financial.expectedRenewalRevenue),
@@ -294,8 +298,12 @@ function opportunityAmount(item: ContextRecord, currency: string) {
     asNumber(item.amountFrom) ||
     asNumber(item.amountUpTo);
   if (!amount) return "Сумма уточняется";
-  if (asNumber(item.amountFrom)) return `от ${moneyLabel(amount, currency)}`;
-  if (asNumber(item.amountUpTo)) return `до ${moneyLabel(amount, currency)}`;
+  if (asNumber(item.amountFrom) || item.amountQualifier === "from") {
+    return `от ${moneyLabel(amount, currency)}`;
+  }
+  if (asNumber(item.amountUpTo) || item.amountQualifier === "up_to") {
+    return `до ${moneyLabel(amount, currency)}`;
+  }
   const suffix = item.billing === "monthly" ? " / мес." : "";
   return `${moneyLabel(amount, currency)}${suffix}`;
 }
@@ -2274,6 +2282,8 @@ function ClientDashboard({
   const locationLabel =
     asText(business.baseLocation) ||
     asText(business.region) ||
+    asText(location.baseLocation) ||
+    asText(location.region) ||
     asText(location.country);
 
   return (
@@ -2390,6 +2400,12 @@ function ClientDashboard({
           <WalletCards size={18} />
         </div>
         <div className="client-money-grid">
+          {finance.contracted > 0 && (
+            <span>
+              Согласовано
+              <strong>{moneyLabel(finance.contracted, finance.currency)}</strong>
+            </span>
+          )}
           <span>
             Получено
             <strong>{moneyLabel(finance.received, finance.currency)}</strong>
@@ -2434,7 +2450,10 @@ function ClientDashboard({
           {Object.keys(project).length > 0 && (
             <div className="client-detail-row">
               <span>
-                <strong>{asText(product.name, "Основной проект")}</strong>
+                <strong>
+                  {asText(project.title) ||
+                    asText(product.name, "Основной проект")}
+                </strong>
                 <small>
                   {asText(project.currentStage) || asText(project.goal)}
                 </small>

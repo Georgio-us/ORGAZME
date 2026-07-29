@@ -158,6 +158,12 @@ function applyContextChange(
         change.field === "base_location" ? "baseLocation" : change.field
       ] = change.value;
       context.location = location;
+      if (change.field === "base_location") {
+        context.business = {
+          ...record(context.business),
+          baseLocation: change.value,
+        };
+      }
       break;
     }
     case "relationship_started":
@@ -172,12 +178,15 @@ function applyContextChange(
       context.relationship = relationship;
       break;
     }
-    case "primary_contact":
-      context.primaryContact = {
+    case "primary_contact": {
+      const relationship = { ...record(context.relationship) };
+      relationship.primaryContact = {
         name: change.title,
-        details: change.value,
+        role: change.value,
       };
+      context.relationship = relationship;
       break;
+    }
     case "stakeholder":
       context.stakeholders = appendUnique(
         records(context.stakeholders),
