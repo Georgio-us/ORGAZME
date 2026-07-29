@@ -109,7 +109,40 @@ type AIProposal = {
     nextAction: string | null;
     amount: string | null;
   } | null;
+  contextChange: {
+    field: string;
+    title: string;
+    value: string;
+    date: string | null;
+    approximate: boolean;
+  } | null;
+  financeChange: {
+    type: string;
+    title: string;
+    amount: number | null;
+    currency: string | null;
+    valueMode: "increment" | "set_total" | "record";
+    amountQualifier: "exact" | "from" | "up_to" | "unknown";
+    status: string | null;
+    occurredDate: string | null;
+    dueDate: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    billing: "one_time" | "monthly" | null;
+    notes: string | null;
+  } | null;
   requiresClarification: boolean;
+};
+
+type AICoverage = {
+  capturedClaims: string[];
+  uncapturedClaims: Array<{ claim: string; reason: string }>;
+};
+
+type AIAnalysis = {
+  mode: "deep" | "fast";
+  model: string;
+  reasoningEffort: string;
 };
 
 type WorkspaceSnapshot = {
@@ -342,6 +375,8 @@ export default function Home() {
   >({});
   const [aiTranscript, setAiTranscript] = useState("");
   const [aiProposalsList, setAiProposalsList] = useState<AIProposal[]>([]);
+  const [aiCoverage, setAiCoverage] = useState<AICoverage | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
 
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -649,6 +684,8 @@ export default function Home() {
       const data = (await response.json()) as {
         transcript?: string;
         proposals?: AIProposal[];
+        coverage?: AICoverage;
+        analysis?: AIAnalysis;
         error?: string;
       };
       if (!response.ok || !data.transcript || !data.proposals) {
@@ -656,6 +693,8 @@ export default function Home() {
       }
       setAiTranscript(data.transcript);
       setAiProposalsList(data.proposals);
+      setAiCoverage(data.coverage ?? null);
+      setAiAnalysis(data.analysis ?? null);
       setProposalStates(
         Object.fromEntries(
           data.proposals.map((proposal) => [proposal.id, "pending"]),
@@ -734,6 +773,8 @@ export default function Home() {
     setVoiceIntent(null);
     setAiTranscript("");
     setAiProposalsList([]);
+    setAiCoverage(null);
+    setAiAnalysis(null);
   };
 
   const setProposal = (id: string, state: ProposalState) => {
@@ -770,6 +811,8 @@ export default function Home() {
       setProposalStates({});
       setAiTranscript("");
       setAiProposalsList([]);
+      setAiCoverage(null);
+      setAiAnalysis(null);
     } catch (error) {
       setVoiceError(
         error instanceof Error ? error.message : "Не удалось сохранить решения.",
@@ -1021,6 +1064,8 @@ export default function Home() {
           proposals={proposalStates}
           transcript={aiTranscript}
           proposalCards={aiProposalsList}
+          coverage={aiCoverage}
+          analysis={aiAnalysis}
           clients={clientRecords}
           onProposal={setProposal}
           onAssignClient={(proposalId, clientId) => {
@@ -3281,6 +3326,8 @@ function VoiceOverlay({
   proposals,
   transcript,
   proposalCards,
+  coverage,
+  analysis,
   clients,
   onProposal,
   onAssignClient,
@@ -3297,6 +3344,8 @@ function VoiceOverlay({
   proposals: Record<string, ProposalState>;
   transcript: string;
   proposalCards: AIProposal[];
+  coverage: AICoverage | null;
+  analysis: AIAnalysis | null;
   clients: Client[];
   onProposal: (id: string, state: ProposalState) => void;
   onAssignClient: (proposalId: string, clientId: string) => void;
@@ -3326,22 +3375,45 @@ function VoiceOverlay({
         )
         .map((proposal) => [proposal.clientRef as string, proposal]),
     );
-    const cards = proposalCards.map((proposal) => ({
-      ...proposal,
-      type: kindLabels[proposal.kind],
-      detail: proposal.requiresClarification
-        ? "Нужно уточнить клиента или недостающие данные"
-        : proposal.dueAt
-          ? new Intl.DateTimeFormat("ru-RU", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            }).format(new Date(proposal.dueAt))
-        : proposal.dueDate
-          ? new Intl.DateTimeFormat("ru-RU", {
-              dateStyle: "medium",
-            }).format(new Date(`${proposal.dueDate}T12:00:00`))
-          : proposal.details || `Контекст · ${scope}`,
-    }));
+    const cards = proposalCards.map((proposal) => {
+      const financeAmount =
+        proposal.financeChange?.amount === null ||
+        proposal.financeChange?.amount === undefined
+          ? null
+          : new Intl.NumberFormat("ru-RU", {
+              maximumFractionDigits: 2,
+            }).format(proposal.financeChange.amount);
+      return {
+        ...proposal,
+        type: proposal.financeChange
+          ? "Финансы"
+          : proposal.contextChange
+            ? "Контекст клиента"
+            : kindLabels[proposal.kind],
+        detail: proposal.requiresClarification
+          ? "Нужно уточнить клиента или недостающие данные"
+          : proposal.financeChange
+            ? [
+                financeAmount,
+                proposal.financeChange.currency,
+                proposal.financeChange.notes,
+              ]
+                .filter(Boolean)
+                .join(" · ") || proposal.financeChange.title
+            : proposal.contextChange
+              ? proposal.contextChange.value
+              : proposal.dueAt
+                ? new Intl.DateTimeFormat("ru-RU", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(proposal.dueAt))
+                : proposal.dueDate
+                  ? new Intl.DateTimeFormat("ru-RU", {
+                      dateStyle: "medium",
+                    }).format(new Date(`${proposal.dueDate}T12:00:00`))
+                  : proposal.details || `Контекст · ${scope}`,
+      };
+    });
     const hasBrokenDependencies = cards.some((card) => {
       if (
         (proposals[card.id] ?? "pending") !== "accepted" ||
@@ -3371,6 +3443,26 @@ function VoiceOverlay({
             <span>Транскрипция</span>
             <p>«{transcript}»</p>
           </div>
+          <div className="coverage-summary">
+            <div>
+              <strong>{coverage?.capturedClaims.length ?? cards.length}</strong>
+              <span>смыслов распознано</span>
+            </div>
+            <small>
+              {analysis?.mode === "deep" ? "Глубокий разбор" : "Быстрый разбор"}
+              {analysis?.model ? ` · ${analysis.model}` : ""}
+            </small>
+          </div>
+          {coverage && coverage.uncapturedClaims.length > 0 && (
+            <div className="coverage-warning">
+              <strong>Не удалось безопасно разложить:</strong>
+              {coverage.uncapturedClaims.map((item) => (
+                <p key={`${item.claim}:${item.reason}`}>
+                  {item.claim} — {item.reason}
+                </p>
+              ))}
+            </div>
+          )}
           <div className="proposal-list">
             {cards.map((card) => {
               const status = proposals[card.id] ?? "pending";
@@ -3381,7 +3473,12 @@ function VoiceOverlay({
                 card.kind === "client_create"
                   ? !card.clientRef || !card.clientDraft?.name.trim()
                   : (!card.clientId && !card.clientRef) ||
-                    (card.kind === "client_update" && !card.clientPatch);
+                    (card.kind === "client_update" &&
+                      [
+                        card.clientPatch,
+                        card.contextChange,
+                        card.financeChange,
+                      ].filter(Boolean).length !== 1);
               return (
                 <article
                   className={`proposal-card proposal-${status}`}

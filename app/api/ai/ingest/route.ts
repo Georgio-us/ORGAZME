@@ -22,6 +22,35 @@ const actionKinds = [
 ] as const;
 
 type ActionKind = (typeof actionKinds)[number];
+const contextFields = [
+  "summary",
+  "business_type",
+  "industry",
+  "country",
+  "region",
+  "base_location",
+  "relationship_started",
+  "relationship_quality",
+  "primary_contact",
+  "stakeholder",
+  "project",
+  "service",
+  "blocker",
+  "priority",
+  "plan",
+  "market",
+  "consultation",
+  "general_fact",
+] as const;
+const financeKinds = [
+  "contract_value",
+  "payment_received",
+  "receivable",
+  "expected_revenue",
+  "opportunity",
+  "recurring_fee",
+  "reimbursement",
+] as const;
 
 type ParsedProposal = {
   kind: ActionKind;
@@ -45,18 +74,65 @@ type ParsedProposal = {
     nextAction: string | null;
     amount: string | null;
   } | null;
+  contextChange: {
+    field: (typeof contextFields)[number];
+    title: string;
+    value: string;
+    date: string | null;
+    approximate: boolean;
+  } | null;
+  financeChange: {
+    type: (typeof financeKinds)[number];
+    title: string;
+    amount: number | null;
+    currency: string | null;
+    valueMode: "increment" | "set_total" | "record";
+    amountQualifier: "exact" | "from" | "up_to" | "unknown";
+    status: string | null;
+    occurredDate: string | null;
+    dueDate: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    billing: "one_time" | "monthly" | null;
+    notes: string | null;
+  } | null;
   requiresClarification: boolean;
 };
 
 const responseSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "proposals"],
+  required: ["summary", "coverage", "proposals"],
   properties: {
     summary: { type: "string" },
+    coverage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["capturedClaims", "uncapturedClaims"],
+      properties: {
+        capturedClaims: {
+          type: "array",
+          maxItems: 48,
+          items: { type: "string" },
+        },
+        uncapturedClaims: {
+          type: "array",
+          maxItems: 16,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["claim", "reason"],
+            properties: {
+              claim: { type: "string" },
+              reason: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     proposals: {
       type: "array",
-      maxItems: 8,
+      maxItems: 32,
       items: {
         type: "object",
         additionalProperties: false,
@@ -70,6 +146,8 @@ const responseSchema = {
           "dueDate",
           "clientDraft",
           "clientPatch",
+          "contextChange",
+          "financeChange",
           "requiresClarification",
         ],
         properties: {
@@ -137,6 +215,74 @@ const responseSchema = {
                   },
                   nextAction: { type: ["string", "null"] },
                   amount: { type: ["string", "null"] },
+                },
+              },
+            ],
+          },
+          contextChange: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["field", "title", "value", "date", "approximate"],
+                properties: {
+                  field: { type: "string", enum: contextFields },
+                  title: { type: "string" },
+                  value: { type: "string" },
+                  date: {
+                    type: ["string", "null"],
+                    description: "Calendar date YYYY-MM-DD when known.",
+                  },
+                  approximate: { type: "boolean" },
+                },
+              },
+            ],
+          },
+          financeChange: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "type",
+                  "title",
+                  "amount",
+                  "currency",
+                  "valueMode",
+                  "amountQualifier",
+                  "status",
+                  "occurredDate",
+                  "dueDate",
+                  "periodStart",
+                  "periodEnd",
+                  "billing",
+                  "notes",
+                ],
+                properties: {
+                  type: { type: "string", enum: financeKinds },
+                  title: { type: "string" },
+                  amount: { type: ["number", "null"] },
+                  currency: { type: ["string", "null"] },
+                  valueMode: {
+                    type: "string",
+                    enum: ["increment", "set_total", "record"],
+                  },
+                  amountQualifier: {
+                    type: "string",
+                    enum: ["exact", "from", "up_to", "unknown"],
+                  },
+                  status: { type: ["string", "null"] },
+                  occurredDate: { type: ["string", "null"] },
+                  dueDate: { type: ["string", "null"] },
+                  periodStart: { type: ["string", "null"] },
+                  periodEnd: { type: ["string", "null"] },
+                  billing: {
+                    type: ["string", "null"],
+                    enum: ["one_time", "monthly", null],
+                  },
+                  notes: { type: ["string", "null"] },
                 },
               },
             ],
@@ -213,23 +359,60 @@ export async function POST(request: NextRequest) {
       clientsContext.find((client) => client.id === requestedClientId) ?? null;
     const now = new Date().toISOString();
 
+    const wordCount = transcript.split(/\s+/u).filter(Boolean).length;
+    const isDeepAnalysis =
+      wordCount >= 24 ||
+      /(?:финанс|деньг|евро|доллар|оплат|получ|долж|чек|доход|апсел|upsell|проект|клиент.{0,30}(?:задач|встреч|событ))/iu.test(
+        transcript,
+      ) ||
+      (transcript.match(/(?:\sи\s|также|потом|дальше|кроме того)/giu) ?? [])
+        .length >= 2;
+    const interpreterModel = isDeepAnalysis
+      ? process.env.OPENAI_COMPLEX_MODEL ?? "gpt-5.6-sol"
+      : process.env.OPENAI_FAST_MODEL ??
+        process.env.OPENAI_MODEL ??
+        "gpt-5.6-terra";
+    const reasoningEffort = isDeepAnalysis ? "medium" : "low";
+
     const response = await openai.responses.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-5.6-terra",
-      reasoning: { effort: "low" },
+      model: interpreterModel,
+      reasoning: { effort: reasoningEffort },
       input: [
         {
           role: "system",
           content:
-            `Ты — транзакционный планировщик PBOS ORGAZME. Преобразуй русскую деловую речь в минимальный упорядоченный план изменений, но ничего не применяй сам.
+            `Ты — внимательный бизнес-интерпретатор PBOS ORGAZME. Преобразуй русскую деловую речь в ИСЧЕРПЫВАЮЩИЙ упорядоченный план атомарных изменений, но ничего не применяй сам.
+
+Главный критерий качества — полнота. Пользователь говорит свободно, длинно и может смешивать в одной записи создание клиента, историю отношений, проекты, контакты, задачи, встречи, деньги, долги, планы, блокеры и возможности. Сначала мысленно выдели все самостоятельные факты и намерения, затем представь КАЖДЫЙ значимый факт отдельным предложением. Не сокращай план ради малого количества карточек и не выбирай только первую команду.
+
+Проверка покрытия:
+- capturedClaims перечисляет короткими фразами все смыслы речи, которые представлены предложениями.
+- uncapturedClaims содержит только смыслы, которые невозможно безопасно представить доступной схемой, с точной причиной.
+- Запрещено молча терять суммы, валюты, сроки, имена, проекты, долги, полученные платежи, апсейлы, договорённости, блокеры и задачи.
 
 Правила клиентов:
 - Если пользователь явно просит создать нового клиента, создай предложение kind=client_create. title и clientDraft.name — точное имя клиента. Дай ему уникальный clientRef вида new_client_1. clientId=null.
 - Все действия для этого нового клиента (встреча, задача, контакт, событие, заметка, обновление) должны иметь тот же clientRef и clientId=null.
 - Для существующего клиента используй только точный id из knownClients, clientRef=null. Не создавай дубль, если имя уверенно совпадает.
 - client_create: clientDraft обязателен, clientPatch=null, dueAt=null. По умолчанию category=active, status="active", attention="calm"; неизвестные поля оставляй null.
-- client_update используй только для изменения карточки существующего или создаваемого клиента; clientPatch обязателен, clientDraft=null.
-- Для остальных видов clientDraft=null и clientPatch=null.
+- kind=client_update имеет три подтипа и содержит РОВНО одно изменение:
+  1) clientPatch — статус, внимание, следующее действие или краткая сумма карточки;
+  2) contextChange — один атомарный факт о бизнесе, отношениях, контакте, проекте, услуге, блокере, приоритете или плане;
+  3) financeChange — одна финансовая запись.
+- Для client_create clientDraft обязателен, остальные изменения null. Полный контекст нового клиента передавай отдельными client_update с тем же clientRef.
+- Для событий clientDraft, clientPatch, contextChange и financeChange равны null.
 - knownClients содержит подтверждённый структурированный context и recentEvents. Используй их как фактическую память системы: не противоречь им и не дублируй уже существующие открытые действия.
+
+Правила контекста:
+- contextChange.field выбирай по точному смыслу. title — короткое читаемое имя факта, value — полное содержание без потери нюансов.
+- Каждого участника, проект, услугу, блокер, приоритет и план возвращай отдельной карточкой.
+- general_fact используй только если ни одно более точное поле не подходит.
+
+Правила финансов:
+- contract_value — стоимость согласованной работы; payment_received — уже полученные деньги; receivable — подтверждённый долг клиента; expected_revenue — ожидаемое согласованное продление; opportunity — потенциальный апсейл; recurring_fee — регулярный чек; reimbursement — возмещение расходов.
+- Не смешивай несколько сумм в одной карточке. Каждая сумма/валюта/назначение — отдельный financeChange.
+- valueMode=set_total, если пользователь явно сообщает общий итог ("всего получил", "остаток долга"). increment — новое поступление/увеличение. record — отдельная запись, которая не должна трактоваться как общий итог.
+- amountQualifier=from/up_to отражает "от"/"до"; exact — точная сумма. Ничего не вычисляй, если пользователь этого не сказал однозначно.
 
 Правила времени:
 - Относительные даты считай от now в Europe/Madrid.
@@ -238,7 +421,7 @@ export async function POST(request: NextRequest) {
 - Если известно точное время, заполни dueAt, а dueDate оставь null.
 - Не выдумывай время, сумму или деловой факт, которых нет в речи.
 
-requiresClarification=true только когда без уточнения нельзя построить применимое изменение. Каждый зависимый шаг должен ссылаться либо на clientId, либо на валидный clientRef. Верни все явно запрошенные действия отдельными предложениями.`,
+requiresClarification=true только когда без уточнения нельзя построить применимое изменение. Каждый зависимый шаг должен ссылаться либо на clientId, либо на валидный clientRef. В финале ещё раз сверь transcript с coverage и proposals.`,
         },
         {
           role: "user",
@@ -264,6 +447,10 @@ requiresClarification=true только когда без уточнения н�
 
     const parsed = JSON.parse(response.output_text) as {
       summary: string;
+      coverage: {
+        capturedClaims: string[];
+        uncapturedClaims: Array<{ claim: string; reason: string }>;
+      };
       proposals: ParsedProposal[];
     };
     const knownClientIds = new Set(clientsContext.map((client) => client.id));
@@ -297,7 +484,9 @@ requiresClarification=true только когда без уточнения н�
         !proposedClientId &&
         !proposedClientRef;
       const incompletePatch =
-        proposal.kind === "client_update" && !proposal.clientPatch;
+        proposal.kind === "client_update" &&
+        [proposal.clientPatch, proposal.contextChange, proposal.financeChange]
+          .filter(Boolean).length !== 1;
       return {
         ...proposal,
         clientId: proposedClientId,
@@ -348,6 +537,12 @@ requiresClarification=true только когда без уточнения н�
       recordingId: recording.id,
       transcript,
       summary: parsed.summary,
+      coverage: parsed.coverage,
+      analysis: {
+        mode: isDeepAnalysis ? "deep" : "fast",
+        model: interpreterModel,
+        reasoningEffort,
+      },
       proposals: saved.map((proposal) => ({
         id: proposal.id,
         ...(proposal.payload as ParsedProposal),
