@@ -40,6 +40,7 @@ h1, h2, h3, p { margin: 0; }
   min-height: 100dvh;
   overflow-x: hidden;
   background: var(--bg);
+  color: var(--text);
 }
 
 .topbar {
@@ -1249,20 +1250,20 @@ h1 {
 }
 
 .app-shell[data-theme="dark"] {
-  --bg: #000;
-  --surface: #1c1c1e;
-  --surface-soft: #2c2c2e;
-  --text: #f5f5f7;
-  --secondary: #98989f;
-  --tertiary: #6e6e73;
-  --separator: rgba(84,84,88,.55);
-  --blue-soft: rgba(10,105,216,.19);
+  --bg: #121214;
+  --surface: #26262a;
+  --surface-soft: #34343a;
+  --text: #f7f7f8;
+  --secondary: #b6b6be;
+  --tertiary: #85858e;
+  --separator: rgba(174,174,184,.22);
+  --blue-soft: rgba(38,129,232,.2);
   color-scheme: dark;
 }
-.app-shell[data-theme="dark"] .topbar { background: rgba(0,0,0,.82); }
-.app-shell[data-theme="dark"] .notification-dot { border-color: #000; }
-.app-shell[data-theme="dark"] .tabbar { background: rgba(22,22,24,.9); }
-.app-shell[data-theme="dark"] .action-button { border-color: rgba(22,22,24,.95); }
+.app-shell[data-theme="dark"] .topbar { background: rgba(18,18,20,.88); }
+.app-shell[data-theme="dark"] .notification-dot { border-color: #121214; }
+.app-shell[data-theme="dark"] .tabbar { background: rgba(28,28,32,.92); }
+.app-shell[data-theme="dark"] .action-button { border-color: rgba(28,28,32,.96); }
 .app-shell[data-theme="dark"] .clients-card {
   background: linear-gradient(145deg, #0876e6, #0753a9);
 }
@@ -1286,20 +1287,20 @@ h1 {
 
 @media (prefers-color-scheme: dark) {
   .app-shell[data-theme="system"] {
-    --bg: #000;
-    --surface: #1c1c1e;
-    --surface-soft: #2c2c2e;
-    --text: #f5f5f7;
-    --secondary: #98989f;
-    --tertiary: #6e6e73;
-    --separator: rgba(84,84,88,.55);
-    --blue-soft: rgba(10,105,216,.19);
+    --bg: #121214;
+    --surface: #26262a;
+    --surface-soft: #34343a;
+    --text: #f7f7f8;
+    --secondary: #b6b6be;
+    --tertiary: #85858e;
+    --separator: rgba(174,174,184,.22);
+    --blue-soft: rgba(38,129,232,.2);
     color-scheme: dark;
   }
-  .app-shell[data-theme="system"] .topbar { background: rgba(0,0,0,.82); }
-  .app-shell[data-theme="system"] .notification-dot { border-color: #000; }
-  .app-shell[data-theme="system"] .tabbar { background: rgba(22,22,24,.9); }
-  .app-shell[data-theme="system"] .action-button { border-color: rgba(22,22,24,.95); }
+  .app-shell[data-theme="system"] .topbar { background: rgba(18,18,20,.88); }
+  .app-shell[data-theme="system"] .notification-dot { border-color: #121214; }
+  .app-shell[data-theme="system"] .tabbar { background: rgba(28,28,32,.92); }
+  .app-shell[data-theme="system"] .action-button { border-color: rgba(28,28,32,.96); }
   .app-shell[data-theme="system"] .clients-card {
     background: linear-gradient(145deg, #0876e6, #0753a9);
   }
