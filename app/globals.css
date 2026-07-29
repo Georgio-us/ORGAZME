@@ -1205,6 +1205,10 @@ h1 {
   color: white;
   text-align: center;
 }
+.voice-modal-tappable {
+  cursor: pointer;
+  touch-action: manipulation;
+}
 .voice-modal .eyebrow { color: rgba(255,255,255,.55); }
 .voice-orb {
   display: grid;

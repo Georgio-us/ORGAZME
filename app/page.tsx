@@ -624,7 +624,6 @@ export default function Home() {
       holdTimer.current = null;
     }
     if (longPressTriggered.current) {
-      stopRecording();
       return;
     }
     setActionOpen(true);
@@ -634,7 +633,6 @@ export default function Home() {
     pointerHeld.current = false;
     if (holdTimer.current) clearTimeout(holdTimer.current);
     holdTimer.current = null;
-    if (longPressTriggered.current) stopRecording();
   };
 
   const cancelRecording = () => {
@@ -2709,7 +2707,20 @@ function VoiceOverlay({
   }
 
   return (
-    <div className="voice-modal">
+    <div
+      className={`voice-modal ${state === "recording" ? "voice-modal-tappable" : ""}`}
+      onClick={state === "recording" ? onStop : undefined}
+      role={state === "recording" ? "button" : undefined}
+      tabIndex={state === "recording" ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (
+          state === "recording" &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          onStop();
+        }
+      }}
+    >
       <span className="eyebrow">
         {intent ? actionLabels[intent] : "Общий голосовой ввод"} · {scope}
       </span>
@@ -2729,14 +2740,29 @@ function VoiceOverlay({
           </p>
           {intent ? (
             <div className="recording-actions">
-              <button className="voice-stop-button" onClick={onStop}>
+              <button
+                className="voice-stop-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onStop();
+                }}
+              >
                 <CircleStop size={16} fill="currentColor" />
                 Завершить
               </button>
-              <button onClick={onCancel}>Отменить</button>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCancel();
+                }}
+              >
+                Отменить
+              </button>
             </div>
           ) : (
-            <span className="release-hint">Отпустите кнопку для завершения</span>
+            <span className="release-hint">
+              Нажмите в любом месте экрана для завершения
+            </span>
           )}
         </>
       )}
