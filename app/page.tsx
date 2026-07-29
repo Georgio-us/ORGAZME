@@ -35,13 +35,20 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 type Screen = "home" | "clients" | "client" | "finances" | "directions";
 type ClientsView = "dashboard" | "list";
 type ClientView = "dashboard" | "events";
 type FinanceView = "dashboard" | "list";
 type DirectionsView = "dashboard" | "list";
+type ClientListPreset = "all" | "active" | "attention";
 type ActionType = "event" | "task" | "meeting" | "contact" | "note";
 type ProposalState = "pending" | "accepted" | "rejected";
 type ThemePreference = "system" | "light" | "dark";
@@ -160,6 +167,66 @@ const initialTimeline: TimelineItem[] = [
   },
 ];
 
+const initialTimelines: Record<string, TimelineItem[]> = {
+  "shaped-house": initialTimeline,
+  domstar: [
+    {
+      id: "domstar-1",
+      kind: "Задача",
+      title: "Согласовать структуру лендинга",
+      detail: "Ожидается ответ клиента",
+      date: "27 июля · 15:20",
+      tone: "red",
+    },
+    {
+      id: "domstar-2",
+      kind: "Контакт",
+      title: "Отправлена новая структура",
+      detail: "Зафиксированы два варианта первого экрана",
+      date: "26 июля · 11:10",
+      tone: "blue",
+    },
+  ],
+  irina: [
+    {
+      id: "irina-1",
+      kind: "Встреча",
+      title: "Zoom по следующей итерации",
+      detail: "Обсудить структуру и приоритеты",
+      date: "Завтра · 19:00",
+      tone: "green",
+    },
+    {
+      id: "irina-2",
+      kind: "Контакт",
+      title: "Подтвердили время встречи",
+      detail: "Клиент на связи, дополнительных вопросов нет",
+      date: "Сегодня · 10:40",
+      tone: "blue",
+    },
+  ],
+  cretalina: [
+    {
+      id: "cretalina-1",
+      kind: "Задача",
+      title: "Подготовить предложение",
+      detail: "Первичная оценка проекта",
+      date: "30 июля",
+      tone: "gray",
+    },
+  ],
+  more: [
+    {
+      id: "more-1",
+      kind: "Задача",
+      title: "Проверить рекламные группы",
+      detail: "Еженедельный аудит",
+      date: "29 июля · 14:00",
+      tone: "green",
+    },
+  ],
+};
+
 const actionLabels: Record<ActionType, string> = {
   event: "Событие",
   task: "Задача",
@@ -192,7 +259,8 @@ export default function Home() {
     useState<DirectionsView>("dashboard");
   const [clientRecords, setClientRecords] = useState<Client[]>(seedClients);
   const [selectedClient, setSelectedClient] = useState<Client>(seedClients[0]);
-  const [timeline, setTimeline] = useState(initialTimeline);
+  const [timelines, setTimelines] =
+    useState<Record<string, TimelineItem[]>>(initialTimelines);
   const [actionOpen, setActionOpen] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -200,6 +268,9 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
+  const [clientEditOpen, setClientEditOpen] = useState(false);
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<TimelineItem | null>(null);
   const [toast, setToast] = useState("");
   const [completedTasks, setCompletedTasks] = useState<string[]>([]);
   const [postponedTasks, setPostponedTasks] = useState<string[]>([]);
@@ -289,6 +360,15 @@ export default function Home() {
     showToast("Клиент создан");
   };
 
+  const updateClient = (updatedClient: Client) => {
+    setClientRecords((current) =>
+      current.map((client) =>
+        client.id === updatedClient.id ? updatedClient : client,
+      ),
+    );
+    setSelectedClient(updatedClient);
+  };
+
   const beginRecording = async (
     intent: ActionType | null,
     requirePointerHold: boolean,
@@ -360,13 +440,21 @@ export default function Home() {
     mediaStream.current?.getTracks().forEach((track) => track.stop());
   };
 
-  const handleActionPointerDown = () => {
+  const handleActionPointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
     pointerHeld.current = true;
     longPressTriggered.current = false;
     holdTimer.current = setTimeout(startGeneralRecording, 420);
   };
 
-  const handleActionPointerUp = () => {
+  const handleActionPointerUp = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     pointerHeld.current = false;
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
@@ -407,19 +495,22 @@ export default function Home() {
         contact: "Созвон по вопросам хостинга",
         note: "Сохранить компактную структуру интерфейса",
       };
-      setTimeline((items) => [
-        {
-          id: `ai-${Date.now()}`,
-          kind: voiceIntent ? actionLabels[voiceIntent] : "AI · подтверждено",
-          title: voiceIntent
-            ? contextualTitles[voiceIntent]
-            : `${acceptedProposals} изменения добавлены`,
-          detail: "Карточка и рабочий контекст обновлены",
-          date: "только что",
-          tone: "green",
-        },
-        ...items,
-      ]);
+      setTimelines((current) => ({
+        ...current,
+        [selectedClient.id]: [
+          {
+            id: `ai-${Date.now()}`,
+            kind: voiceIntent ? actionLabels[voiceIntent] : "AI · подтверждено",
+            title: voiceIntent
+              ? contextualTitles[voiceIntent]
+              : `${acceptedProposals} изменения добавлены`,
+            detail: "Карточка и рабочий контекст обновлены",
+            date: "только что",
+            tone: "green",
+          },
+          ...(current[selectedClient.id] ?? []),
+        ],
+      }));
     }
     showToast(
       acceptedProposals > 0
@@ -492,7 +583,7 @@ export default function Home() {
             client={selectedClient}
             view={clientView}
             onViewChange={setClientView}
-            timeline={timeline}
+            timeline={timelines[selectedClient.id] ?? []}
             taskCompleted={completedTasks.includes(selectedClient.id)}
             taskPostponed={postponedTasks.includes(selectedClient.id)}
             onCompleteTask={() => {
@@ -505,7 +596,7 @@ export default function Home() {
             }}
             onOpenEvents={() => setClientView("events")}
             onOpenMenu={() => setClientMenuOpen(true)}
-            onAction={showToast}
+            onEditEvent={setEditingEvent}
           />
         )}
 
@@ -688,9 +779,65 @@ export default function Home() {
         <ClientMenuSheet
           client={selectedClient}
           onClose={() => setClientMenuOpen(false)}
-          onSelect={(label) => {
+          onEdit={() => {
             setClientMenuOpen(false);
-            showToast(label);
+            setClientEditOpen(true);
+          }}
+          onAttention={() => {
+            setClientMenuOpen(false);
+            setAttentionOpen(true);
+          }}
+          onCopy={async () => {
+            const cardText = `${selectedClient.name}\n${selectedClient.status}\nСледующее: ${selectedClient.nextAction}\n${selectedClient.amount}`;
+            try {
+              await navigator.clipboard.writeText(cardText);
+              showToast("Карточка скопирована");
+            } catch {
+              showToast("Не удалось скопировать карточку");
+            }
+            setClientMenuOpen(false);
+          }}
+        />
+      )}
+
+      {clientEditOpen && (
+        <ClientEditSheet
+          client={selectedClient}
+          onClose={() => setClientEditOpen(false)}
+          onSave={(updatedClient) => {
+            updateClient(updatedClient);
+            setClientEditOpen(false);
+            showToast("Карточка клиента обновлена");
+          }}
+        />
+      )}
+
+      {attentionOpen && (
+        <AttentionSheet
+          client={selectedClient}
+          onClose={() => setAttentionOpen(false)}
+          onSelect={(attention) => {
+            updateClient({ ...selectedClient, attention });
+            setAttentionOpen(false);
+            showToast("Уровень внимания изменён");
+          }}
+        />
+      )}
+
+      {editingEvent && (
+        <EventEditSheet
+          event={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onSave={(updatedEvent) => {
+            setTimelines((current) => ({
+              ...current,
+              [selectedClient.id]: (current[selectedClient.id] ?? []).map(
+                (item) =>
+                  item.id === updatedEvent.id ? updatedEvent : item,
+              ),
+            }));
+            setEditingEvent(null);
+            showToast("Событие обновлено");
           }}
         />
       )}
@@ -1053,55 +1200,98 @@ function ClientsScreen({
   onViewChange: (view: ClientsView) => void;
   onOpenClient: (client: Client) => void;
 }) {
-  return (
-    <div className="screen clients-screen">
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">Направление</span>
-          <h1>Клиенты</h1>
-        </div>
-        <ViewToggle
-          active={view}
-          left="dashboard"
-          right="list"
-          onChange={onViewChange}
-        />
-      </div>
+  const [listPreset, setListPreset] = useState<ClientListPreset>("all");
+  const [todayOpen, setTodayOpen] = useState(false);
+  const openList = (preset: ClientListPreset) => {
+    setListPreset(preset);
+    onViewChange("list");
+  };
 
-      {view === "dashboard" ? (
-        <ClientsDashboard clients={clients} onOpenClient={onOpenClient} />
-      ) : (
-        <ClientsList clients={clients} onOpenClient={onOpenClient} />
+  return (
+    <>
+      <div className="screen clients-screen">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Направление</span>
+            <h1>Клиенты</h1>
+          </div>
+          <ViewToggle
+            active={view}
+            left="dashboard"
+            right="list"
+            onChange={(nextView) => {
+              if (nextView === "list") setListPreset("all");
+              onViewChange(nextView);
+            }}
+          />
+        </div>
+
+        {view === "dashboard" ? (
+          <ClientsDashboard
+            clients={clients}
+            onOpenClient={onOpenClient}
+            onShowActive={() => openList("active")}
+            onShowAttention={() => openList("attention")}
+            onShowToday={() => setTodayOpen(true)}
+          />
+        ) : (
+          <ClientsList
+            clients={clients}
+            preset={listPreset}
+            onOpenClient={onOpenClient}
+          />
+        )}
+      </div>
+      {todayOpen && (
+        <TodayActionsSheet
+          clients={clients}
+          onClose={() => setTodayOpen(false)}
+          onOpenClient={(client) => {
+            setTodayOpen(false);
+            onOpenClient(client);
+          }}
+        />
       )}
-    </div>
+    </>
   );
 }
 
 function ClientsDashboard({
   clients,
   onOpenClient,
+  onShowActive,
+  onShowAttention,
+  onShowToday,
 }: {
   clients: Client[];
   onOpenClient: (client: Client) => void;
+  onShowActive: () => void;
+  onShowAttention: () => void;
+  onShowToday: () => void;
 }) {
+  const shapedHouse = clients.find((client) => client.id === "shaped-house");
+  const irina = clients.find((client) => client.id === "irina");
   return (
     <>
       <div className="metric-grid">
-        <article className="metric-card metric-primary">
+        <button
+          className="metric-card metric-primary"
+          onClick={onShowActive}
+        >
           <span>Активные</span>
           <strong>{clients.filter((client) => client.category === "Активный").length}</strong>
           <small>из {clients.length} клиентов</small>
-        </article>
-        <article className="metric-card">
+        </button>
+        <button className="metric-card" onClick={onShowAttention}>
           <span>Просрочено</span>
           <strong className="danger-text">1</strong>
           <small>задача</small>
-        </article>
-        <article className="metric-card">
+        </button>
+        <button className="metric-card" onClick={onShowToday}>
           <span>Сегодня</span>
           <strong>3</strong>
           <small>действия</small>
-        </article>
+        </button>
       </div>
 
       <section className="attention-panel">
@@ -1142,22 +1332,30 @@ function ClientsDashboard({
             <h2>Сегодня</h2>
           </div>
         </div>
-        <div className="today-line">
+        <button
+          className="today-line"
+          onClick={() => shapedHouse && onOpenClient(shapedHouse)}
+        >
           <time>12:00</time>
           <span className="timeline-pin blue" />
           <div>
             <strong>Отправить отчёт</strong>
             <small>Shaped House · просрочено</small>
           </div>
-        </div>
-        <div className="today-line">
+          <ChevronRight size={14} />
+        </button>
+        <button
+          className="today-line"
+          onClick={() => irina && onOpenClient(irina)}
+        >
           <time>19:00</time>
           <span className="timeline-pin green" />
           <div>
             <strong>Zoom с Ириной</strong>
             <small>Обсудить следующую итерацию</small>
           </div>
-        </div>
+          <ChevronRight size={14} />
+        </button>
       </section>
     </>
   );
@@ -1165,13 +1363,16 @@ function ClientsDashboard({
 
 function ClientsList({
   clients,
+  preset,
   onOpenClient,
 }: {
   clients: Client[];
+  preset: ClientListPreset;
   onOpenClient: (client: Client) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [attentionOnly, setAttentionOnly] = useState(preset === "attention");
+  const [activeOnly, setActiveOnly] = useState(preset === "active");
   const [sortBy, setSortBy] = useState<"attention" | "name">("attention");
   const filteredClients = clients
     .filter((client) =>
@@ -1182,6 +1383,7 @@ function ClientsList({
         ? client.attention === "overdue" || client.attention === "attention"
         : true,
     )
+    .filter((client) => (activeOnly ? client.category === "Активный" : true))
     .sort((a, b) =>
       sortBy === "name"
         ? a.name.localeCompare(b.name, "ru")
@@ -1206,6 +1408,13 @@ function ClientsList({
         </label>
         <div className="filter-row">
           <button
+            className={activeOnly ? "filter-chip active" : "filter-chip"}
+            onClick={() => setActiveOnly((value) => !value)}
+          >
+            <Users size={12} />
+            Активные
+          </button>
+          <button
             className={attentionOnly ? "filter-chip active" : "filter-chip"}
             onClick={() => setAttentionOnly((value) => !value)}
           >
@@ -1223,7 +1432,13 @@ function ClientsList({
         </div>
       </div>
       <div className="list-summary">
-        <span>Сначала требующие внимания</span>
+        <span>
+          {attentionOnly
+            ? "Требующие внимания"
+            : activeOnly
+              ? "Активные клиенты"
+              : "Сначала требующие внимания"}
+        </span>
         <strong>{filteredClients.length} клиентов</strong>
       </div>
       {filteredClients.map((client) => (
@@ -1280,7 +1495,7 @@ function ClientScreen({
   onPostponeTask,
   onOpenEvents,
   onOpenMenu,
-  onAction,
+  onEditEvent,
 }: {
   client: Client;
   view: ClientView;
@@ -1292,7 +1507,7 @@ function ClientScreen({
   onPostponeTask: () => void;
   onOpenEvents: () => void;
   onOpenMenu: () => void;
-  onAction: (message: string) => void;
+  onEditEvent: (event: TimelineItem) => void;
 }) {
   return (
     <div className="screen client-screen">
@@ -1332,7 +1547,7 @@ function ClientScreen({
           onOpenEvents={onOpenEvents}
         />
       ) : (
-        <ClientTimeline timeline={timeline} onAction={onAction} />
+        <ClientTimeline timeline={timeline} onEditEvent={onEditEvent} />
       )}
     </div>
   );
@@ -1353,25 +1568,67 @@ function ClientDashboard({
   onPostponeTask: () => void;
   onOpenEvents: () => void;
 }) {
+  const attentionCopy: Record<
+    Client["attention"],
+    { label: string; level: string; due: string }
+  > = {
+    overdue: {
+      label: "Просрочено 2 дня",
+      level: "Высокий",
+      due: "Срок: 26 июля · 12:00",
+    },
+    attention: {
+      label: "Требует внимания",
+      level: "Повышенный",
+      due: "Ожидается решение",
+    },
+    active: {
+      label: "Активно",
+      level: "Рабочий",
+      due: client.id === "irina" ? "Завтра · 19:00" : "В работе",
+    },
+    calm: {
+      label: "Без срочности",
+      level: "Спокойный",
+      due: "Срок не назначен",
+    },
+  };
+  const attentionState = attentionCopy[client.attention];
+  const taskClass = taskCompleted
+    ? "task-completed"
+    : taskPostponed
+      ? "task-postponed"
+      : `task-${client.attention}`;
+  const contactDetail =
+    client.id === "irina"
+      ? "Подтверждение встречи"
+      : client.id === "shaped-house"
+        ? "Созвон по хостингу"
+        : "Последнее взаимодействие";
+  const nextMeeting =
+    client.id === "irina"
+      ? { date: "Завтра", time: "19:00 · Zoom" }
+      : { date: "30 июля", time: "12:00 · Zoom" };
+
   return (
     <div className="client-dashboard">
-      <section
-        className={`current-task-card ${
-          taskCompleted
-            ? "task-completed"
-            : taskPostponed
-              ? "task-postponed"
-              : "task-overdue"
-        }`}
-      >
+      <section className={`current-task-card ${taskClass}`}>
         <div className="task-label">
           <span>Текущая задача</span>
-          <span className={taskCompleted ? "complete-pill" : "overdue-pill"}>
+          <span
+            className={
+              taskCompleted
+                ? "complete-pill"
+                : taskPostponed
+                  ? "postponed-pill"
+                  : `task-status-pill ${client.attention}`
+            }
+          >
             {taskCompleted
               ? "Выполнено"
               : taskPostponed
                 ? "Перенесено"
-                : "Просрочено 2 дня"}
+                : attentionState.label}
           </span>
         </div>
         <h2>{client.nextAction}</h2>
@@ -1380,7 +1637,7 @@ function ClientDashboard({
             ? "Завершено только что"
             : taskPostponed
               ? "Новый срок: 30 июля · 12:00"
-              : "Срок: 26 июля · 12:00"}
+              : attentionState.due}
         </p>
         {!taskCompleted && (
           <div className="task-actions">
@@ -1394,12 +1651,12 @@ function ClientDashboard({
         <article className="info-card">
           <span>Последний контакт</span>
           <strong>{client.lastContact}</strong>
-          <small>Созвон по хостингу</small>
+          <small>{contactDetail}</small>
         </article>
         <article className="info-card">
           <span>Ближайшая встреча</span>
-          <strong>30 июля</strong>
-          <small>12:00 · Zoom</small>
+          <strong>{nextMeeting.date}</strong>
+          <small>{nextMeeting.time}</small>
         </article>
         <article className="info-card">
           <span>Финансовый контекст</span>
@@ -1408,7 +1665,7 @@ function ClientDashboard({
         </article>
         <article className="info-card">
           <span>Уровень внимания</span>
-          <strong>Высокий</strong>
+          <strong>{attentionState.level}</strong>
           <small>Можно изменить вручную</small>
         </article>
       </div>
@@ -1417,8 +1674,8 @@ function ClientDashboard({
         <span className="eyebrow">Подтверждённый контекст</span>
         <h2>Коротко о состоянии</h2>
         <p>
-          Клиент активен. Последний контакт был четыре дня назад. Есть
-          просроченная задача и согласован следующий созвон.
+          Статус: {client.status.toLowerCase()}. Последний контакт —{" "}
+          {client.lastContact}. Следующее действие: {client.nextAction}.
         </p>
         <button onClick={onOpenEvents}>Открыть события →</button>
       </section>
@@ -1428,10 +1685,10 @@ function ClientDashboard({
 
 function ClientTimeline({
   timeline,
-  onAction,
+  onEditEvent,
 }: {
   timeline: TimelineItem[];
-  onAction: (message: string) => void;
+  onEditEvent: (event: TimelineItem) => void;
 }) {
   return (
     <div className="timeline-list">
@@ -1452,7 +1709,7 @@ function ClientTimeline({
           </div>
           <button
             aria-label="Редактировать событие"
-            onClick={() => onAction(`Редактирование: ${item.title}`)}
+            onClick={() => onEditEvent(item)}
           >
             <MoreHorizontal size={16} />
           </button>
@@ -1500,6 +1757,147 @@ function ViewToggle<
         {right === "events" && <Clock3 size={13} />}
         {labels[right]}
       </button>
+    </div>
+  );
+}
+
+function TodayActionsSheet({
+  clients,
+  onClose,
+  onOpenClient,
+}: {
+  clients: Client[];
+  onClose: () => void;
+  onOpenClient: (client: Client) => void;
+}) {
+  const actions = [
+    {
+      clientId: "shaped-house",
+      time: "12:00",
+      title: "Отправить обновлённый отчёт",
+      detail: "Просрочено · требует решения",
+      tone: "agenda-danger",
+      icon: CircleAlert,
+    },
+    {
+      clientId: "irina",
+      time: "19:00",
+      title: "Zoom с Ириной",
+      detail: "Обсудить следующую итерацию",
+      tone: "agenda-blue",
+      icon: CalendarClock,
+    },
+    {
+      clientId: "domstar",
+      time: "До конца дня",
+      title: "Проверить ответ DomStar",
+      detail: "Согласование структуры лендинга",
+      tone: "agenda-purple",
+      icon: Contact,
+    },
+  ];
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">28 июля</span>
+            <h2>Действия сегодня</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="notification-list">
+          {actions.map(({ clientId, time, title, detail, tone, icon: Icon }) => {
+            const client = clients.find((item) => item.id === clientId);
+            return (
+              <button
+                key={clientId}
+                onClick={() => client && onOpenClient(client)}
+              >
+                <span className={`agenda-icon ${tone}`}><Icon size={16} /></span>
+                <span>
+                  <strong>{title}</strong>
+                  <small>{time} · {detail}</small>
+                </span>
+                <ChevronRight size={15} />
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EventEditSheet({
+  event,
+  onClose,
+  onSave,
+}: {
+  event: TimelineItem;
+  onClose: () => void;
+  onSave: (event: TimelineItem) => void;
+}) {
+  const [title, setTitle] = useState(event.title);
+  const [detail, setDetail] = useState(event.detail);
+  const [date, setDate] = useState(event.date);
+
+  return (
+    <div className="overlay">
+      <section className="bottom-sheet form-sheet">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">{event.kind}</span>
+            <h2>Редактировать событие</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="form-stack">
+          <label>
+            <span>Название</span>
+            <input
+              autoFocus
+              value={title}
+              onChange={(inputEvent) => setTitle(inputEvent.target.value)}
+            />
+          </label>
+          <label>
+            <span>Описание</span>
+            <textarea
+              value={detail}
+              onChange={(inputEvent) => setDetail(inputEvent.target.value)}
+            />
+          </label>
+          <label>
+            <span>Дата и время</span>
+            <input
+              value={date}
+              onChange={(inputEvent) => setDate(inputEvent.target.value)}
+            />
+          </label>
+        </div>
+        <button
+          className="primary-button"
+          disabled={!title.trim()}
+          onClick={() =>
+            onSave({
+              ...event,
+              title: title.trim(),
+              detail: detail.trim(),
+              date: date.trim(),
+            })
+          }
+        >
+          Сохранить изменения
+        </button>
+      </section>
     </div>
   );
 }
@@ -1750,15 +2148,176 @@ function InterfaceSettingsSheet({
   );
 }
 
-function ClientMenuSheet({
+function ClientEditSheet({
+  client,
+  onClose,
+  onSave,
+}: {
+  client: Client;
+  onClose: () => void;
+  onSave: (client: Client) => void;
+}) {
+  const [name, setName] = useState(client.name);
+  const [category, setCategory] = useState(client.category);
+  const [status, setStatus] = useState(client.status);
+  const [nextAction, setNextAction] = useState(client.nextAction);
+  const [amount, setAmount] = useState(client.amount);
+
+  return (
+    <div className="overlay">
+      <section className="bottom-sheet form-sheet">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Клиент</span>
+            <h2>Редактировать карточку</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="form-stack">
+          <label>
+            <span>Имя или компания</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div>
+            <span className="form-label">Тип клиента</span>
+            <div className="form-segment">
+              {(["Потенциальный", "Активный"] as const).map((value) => (
+                <button
+                  className={category === value ? "active" : ""}
+                  key={value}
+                  onClick={() => setCategory(value)}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label>
+            <span>Текущий статус</span>
+            <input value={status} onChange={(event) => setStatus(event.target.value)} />
+          </label>
+          <label>
+            <span>Следующее действие</span>
+            <input
+              value={nextAction}
+              onChange={(event) => setNextAction(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Финансовый контекст</span>
+            <input value={amount} onChange={(event) => setAmount(event.target.value)} />
+          </label>
+        </div>
+        <button
+          className="primary-button"
+          disabled={!name.trim() || !status.trim()}
+          onClick={() =>
+            onSave({
+              ...client,
+              name: name.trim(),
+              category,
+              status: status.trim(),
+              nextAction: nextAction.trim() || "Определить следующее действие",
+              amount: amount.trim() || "Не указано",
+            })
+          }
+        >
+          Сохранить изменения
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function AttentionSheet({
   client,
   onClose,
   onSelect,
 }: {
   client: Client;
   onClose: () => void;
-  onSelect: (label: string) => void;
+  onSelect: (attention: Client["attention"]) => void;
 }) {
+  const options: Array<{
+    value: Client["attention"];
+    label: string;
+    detail: string;
+  }> = [
+    { value: "calm", label: "Спокойно", detail: "Срочных действий нет" },
+    { value: "active", label: "Активно", detail: "Есть текущее действие" },
+    { value: "attention", label: "Требует внимания", detail: "Нужно принять решение" },
+    { value: "overdue", label: "Просрочено", detail: "Есть нарушенный срок" },
+  ];
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">{client.name}</span>
+            <h2>Уровень внимания</h2>
+          </div>
+          <button className="close-button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="attention-options">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              className={client.attention === option.value ? "active" : ""}
+              onClick={() => onSelect(option.value)}
+            >
+              <span className={`client-indicator ${option.value}`} />
+              <span>
+                <strong>{option.label}</strong>
+                <small>{option.detail}</small>
+              </span>
+              {client.attention === option.value && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ClientMenuSheet({
+  client,
+  onClose,
+  onEdit,
+  onAttention,
+  onCopy,
+}: {
+  client: Client;
+  onClose: () => void;
+  onEdit: () => void;
+  onAttention: () => void;
+  onCopy: () => void;
+}) {
+  const items = [
+    {
+      label: "Редактировать карточку",
+      detail: "Имя, статус, следующее действие и финансы",
+      icon: Pencil,
+      action: onEdit,
+    },
+    {
+      label: "Уровень внимания",
+      detail: "Спокойно, активно, внимание или просрочено",
+      icon: CircleAlert,
+      action: onAttention,
+    },
+    {
+      label: "Копировать сводку",
+      detail: "Скопировать краткий контекст клиента",
+      icon: Contact,
+      action: onCopy,
+    },
+  ];
+
   return (
     <div className="overlay" onClick={onClose}>
       <section className="bottom-sheet" onClick={(event) => event.stopPropagation()}>
@@ -1768,17 +2327,16 @@ function ClientMenuSheet({
           <button className="close-button" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="action-grid">
-          {["Редактирование открыто", "Уровень внимания изменён", "Карточка скопирована"].map(
-            (label, index) => (
-              <button className="action-choice" key={label} onClick={() => onSelect(label)}>
-                <span>
-                  {index === 0 ? <Pencil size={17} /> : index === 1 ? <CircleAlert size={17} /> : <Contact size={17} />}
-                </span>
-                {label.replace(" открыто", "").replace(" изменён", "").replace(" скопирована", "")}
-                <ChevronRight size={16} className="choice-chevron" />
-              </button>
-            ),
-          )}
+          {items.map(({ label, detail, icon: Icon, action }) => (
+            <button className="action-choice client-menu-choice" key={label} onClick={action}>
+              <span><Icon size={17} /></span>
+              <span className="choice-copy">
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </span>
+              <ChevronRight size={16} className="choice-chevron" />
+            </button>
+          ))}
         </div>
       </section>
     </div>
