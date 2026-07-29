@@ -572,6 +572,7 @@ export default function Home() {
           id: proposal.id,
           status: proposalStates[proposal.id] as "accepted" | "rejected",
           title: editedTitles[proposal.id],
+          clientId: proposal.clientId,
         }));
       const response = await fetch("/api/ai/apply", {
         method: "POST",
@@ -839,7 +840,17 @@ export default function Home() {
           proposals={proposalStates}
           transcript={aiTranscript}
           proposalCards={aiProposalsList}
+          clients={clientRecords}
           onProposal={setProposal}
+          onAssignClient={(proposalId, clientId) => {
+            setAiProposalsList((current) =>
+              current.map((proposal) =>
+                proposal.id === proposalId
+                  ? { ...proposal, clientId }
+                  : proposal,
+              ),
+            );
+          }}
           onCancel={cancelRecording}
           onStop={stopRecording}
           onRetry={() => {
@@ -2499,7 +2510,9 @@ function VoiceOverlay({
   proposals,
   transcript,
   proposalCards,
+  clients,
   onProposal,
+  onAssignClient,
   onCancel,
   onStop,
   onRetry,
@@ -2513,7 +2526,9 @@ function VoiceOverlay({
   proposals: Record<string, ProposalState>;
   transcript: string;
   proposalCards: AIProposal[];
+  clients: Client[];
   onProposal: (id: string, state: ProposalState) => void;
+  onAssignClient: (proposalId: string, clientId: string) => void;
   onCancel: () => void;
   onStop: () => void;
   onRetry: () => void;
@@ -2564,6 +2579,9 @@ function VoiceOverlay({
           <div className="proposal-list">
             {cards.map((card) => {
               const status = proposals[card.id] ?? "pending";
+              const confirmationBlocked =
+                !card.clientId ||
+                (card.kind === "client_update" && !card.clientPatch);
               return (
                 <article
                   className={`proposal-card proposal-${status}`}
@@ -2591,8 +2609,31 @@ function VoiceOverlay({
                       <h3>{editedTitles[card.id] ?? card.title}</h3>
                     )}
                     <p>{card.detail}</p>
-                    {card.requiresClarification && (
-                      <small>Это предложение нельзя применить без уточнения.</small>
+                    {!card.clientId && (
+                      <label className="proposal-client-field">
+                        <span>Выберите клиента</span>
+                        <select
+                          value=""
+                          onChange={(event) =>
+                            onAssignClient(card.id, event.target.value)
+                          }
+                        >
+                          <option value="" disabled>
+                            Клиент не определён
+                          </option>
+                          {clients.map((client) => (
+                            <option value={client.id} key={client.id}>
+                              {client.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {card.requiresClarification && !confirmationBlocked && (
+                      <small className="proposal-advisory">
+                        AI рекомендует проверить детали. Можно подтвердить как
+                        есть или отредактировать название.
+                      </small>
                     )}
                   </div>
                   <div className="proposal-actions">
@@ -2612,7 +2653,7 @@ function VoiceOverlay({
                     </button>
                     <button
                       className="accept"
-                      disabled={card.requiresClarification}
+                      disabled={confirmationBlocked}
                       onClick={() => onProposal(card.id, "accepted")}
                       aria-label="Подтвердить"
                     >

@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
         id: string;
         status: "accepted" | "rejected";
         title?: string;
+        clientId?: string | null;
       }>;
     };
     const decisions = body.decisions ?? [];
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
         const decision = decisions.find((item) => item.id === proposal.id);
         if (!decision) continue;
         const payload = proposal.payload as ProposalPayload;
+        const clientId = decision.clientId || payload.clientId;
         const reviewedAt = new Date();
 
         if (decision.status === "rejected") {
@@ -63,8 +65,8 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        if (payload.requiresClarification || !payload.clientId) {
-          throw new Error("Предложение требует уточнения клиента.");
+        if (!clientId) {
+          throw new Error("Для предложения необходимо выбрать клиента.");
         }
 
         if (payload.kind === "client_update") {
@@ -81,7 +83,7 @@ export async function POST(request: NextRequest) {
             })
             .where(
               and(
-                eq(clients.id, payload.clientId),
+                eq(clients.id, clientId),
                 eq(clients.ownerId, OWNER_ID),
               ),
             );
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest) {
           const dueAt = payload.dueAt ? new Date(payload.dueAt) : null;
           await tx.insert(events).values({
             ownerId: OWNER_ID,
-            clientId: payload.clientId,
+            clientId,
             kind: payload.kind,
             title: decision.title?.trim() || payload.title,
             details: payload.details,
