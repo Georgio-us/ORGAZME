@@ -63,6 +63,7 @@ type Client = {
   lastContact: string;
   lastContactDays: number;
   amount: string;
+  context: Record<string, unknown>;
 };
 
 type TimelineItem = {
@@ -1748,6 +1749,10 @@ function ClientDashboard({
     : taskPostponed
       ? "task-postponed"
       : `task-${client.attention}`;
+  const confirmedSummary =
+    typeof client.context.summary === "string" && client.context.summary.trim()
+      ? client.context.summary
+      : `Статус: ${client.status.toLowerCase()}. Последний контакт — ${client.lastContact}. Следующее действие: ${client.nextAction}.`;
 
   return (
     <div className="client-dashboard">
@@ -1818,10 +1823,7 @@ function ClientDashboard({
       <section className="summary-card">
         <span className="eyebrow">Подтверждённый контекст</span>
         <h2>Коротко о состоянии</h2>
-        <p>
-          Статус: {client.status.toLowerCase()}. Последний контакт —{" "}
-          {client.lastContact}. Следующее действие: {client.nextAction}.
-        </p>
+        <p>{confirmedSummary}</p>
         <button onClick={onOpenEvents}>Открыть события →</button>
       </section>
     </div>
@@ -2076,6 +2078,7 @@ function NewClientSheet({
       lastContact: "только что",
       lastContactDays: 0,
       amount: amount.trim() || "Не указано",
+      context: {},
     });
   };
 

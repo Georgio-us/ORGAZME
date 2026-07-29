@@ -50,6 +50,7 @@ export function serializeClient(client: typeof clients.$inferSelect) {
     lastContact: contact.label,
     lastContactDays: contact.days,
     amount: client.amount,
+    context: client.context ?? {},
   };
 }
 
@@ -108,4 +109,44 @@ export async function getWorkspaceSnapshot() {
     clients: clientRows.map(serializeClient),
     timelines,
   };
+}
+
+export async function getAIWorkspaceContext() {
+  await ensureWorkspace();
+  const db = getDb();
+  const clientRows = await db
+    .select()
+    .from(clients)
+    .where(and(eq(clients.ownerId, OWNER_ID), eq(clients.archived, false)))
+    .orderBy(asc(clients.createdAt));
+  const eventRows = await db
+    .select()
+    .from(events)
+    .where(eq(events.ownerId, OWNER_ID))
+    .orderBy(asc(events.occurredAt));
+
+  return clientRows.map((client) => ({
+    id: client.id,
+    name: client.name,
+    category: client.category,
+    status: client.status,
+    attention: client.attention,
+    nextAction: client.nextAction,
+    lastContactAt: client.lastContactAt?.toISOString() ?? null,
+    amount: client.amount,
+    context: client.context ?? {},
+    recentEvents: eventRows
+      .filter((event) => event.clientId === client.id)
+      .slice(-50)
+      .reverse()
+      .map((event) => ({
+        id: event.id,
+        kind: event.kind,
+        title: event.title,
+        details: event.details,
+        occurredAt: event.occurredAt.toISOString(),
+        dueAt: event.dueAt?.toISOString() ?? null,
+        completedAt: event.completedAt?.toISOString() ?? null,
+      })),
+  }));
 }

@@ -2,7 +2,11 @@ import OpenAI, { toFile } from "openai";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { aiProposals, recordings } from "@/db/schema";
-import { ensureWorkspace, getWorkspaceSnapshot, OWNER_ID } from "@/lib/orgazme";
+import {
+  ensureWorkspace,
+  getAIWorkspaceContext,
+  OWNER_ID,
+} from "@/lib/orgazme";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -197,14 +201,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const snapshot = await getWorkspaceSnapshot();
-    const clientsContext = snapshot.clients.map((client) => ({
-      id: client.id,
-      name: client.name,
-      status: client.status,
-      attention: client.attention,
-      nextAction: client.nextAction,
-    }));
+    const clientsContext = await getAIWorkspaceContext();
     const selectedClient =
       clientsContext.find((client) => client.id === requestedClientId) ?? null;
     const now = new Date().toISOString();
@@ -225,6 +222,7 @@ export async function POST(request: NextRequest) {
 - client_create: clientDraft обязателен, clientPatch=null, dueAt=null. По умолчанию category=active, status="active", attention="calm"; неизвестные поля оставляй null.
 - client_update используй только для изменения карточки существующего или создаваемого клиента; clientPatch обязателен, clientDraft=null.
 - Для остальных видов clientDraft=null и clientPatch=null.
+- knownClients содержит подтверждённый структурированный context и recentEvents. Используй их как фактическую память системы: не противоречь им и не дублируй уже существующие открытые действия.
 
 Правила времени:
 - Относительные даты считай от now в Europe/Madrid.
