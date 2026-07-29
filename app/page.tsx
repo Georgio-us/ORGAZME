@@ -18,6 +18,8 @@ import {
   Layers3,
   List,
   Mic,
+  Monitor,
+  Moon,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -26,13 +28,14 @@ import {
   SlidersHorizontal,
   Sparkles,
   StickyNote,
+  Sun,
   TrendingUp,
   Users,
   WalletCards,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Screen = "home" | "clients" | "client" | "finances" | "directions";
 type ClientsView = "dashboard" | "list";
@@ -41,6 +44,7 @@ type FinanceView = "dashboard" | "list";
 type DirectionsView = "dashboard" | "list";
 type ActionType = "event" | "task" | "meeting" | "contact" | "note";
 type ProposalState = "pending" | "accepted" | "rejected";
+type ThemePreference = "system" | "light" | "dark";
 
 type Client = {
   id: string;
@@ -193,6 +197,8 @@ export default function Home() {
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemePreference>("system");
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [completedTasks, setCompletedTasks] = useState<string[]>([]);
@@ -232,6 +238,23 @@ export default function Home() {
         .length,
     [proposalStates],
   );
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("orgazme-theme");
+    if (
+      savedTheme === "system" ||
+      savedTheme === "light" ||
+      savedTheme === "dark"
+    ) {
+      const frame = window.requestAnimationFrame(() => setTheme(savedTheme));
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, []);
+
+  const changeTheme = (nextTheme: ThemePreference) => {
+    setTheme(nextTheme);
+    window.localStorage.setItem("orgazme-theme", nextTheme);
+  };
 
   const goBack = () => {
     if (screen === "client") {
@@ -409,7 +432,7 @@ export default function Home() {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-theme={theme}>
       <header className="topbar">
         <div className="topbar-left">
           {screen !== "home" ? (
@@ -642,10 +665,22 @@ export default function Home() {
       {menuOpen && (
         <MainMenuSheet
           onClose={() => setMenuOpen(false)}
+          onOpenSettings={() => {
+            setMenuOpen(false);
+            setSettingsOpen(true);
+          }}
           onSelect={(label) => {
             setMenuOpen(false);
             showToast(`${label}: демо-раздел открыт`);
           }}
+        />
+      )}
+
+      {settingsOpen && (
+        <InterfaceSettingsSheet
+          theme={theme}
+          onThemeChange={changeTheme}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -718,7 +753,10 @@ function HomeScreen({
           </div>
         </button>
 
-        <button className="direction-card" onClick={onFinances}>
+        <button
+          className="direction-card finance-card"
+          onClick={onFinances}
+        >
           <div className="direction-topline">
             <span className="direction-icon finance-icon"><WalletCards size={19} /></span>
             <ChevronRight size={17} className="card-chevron" />
@@ -729,7 +767,10 @@ function HomeScreen({
           </div>
         </button>
 
-        <button className="direction-card" onClick={onDirections}>
+        <button
+          className="direction-card directions-card"
+          onClick={onDirections}
+        >
           <div className="direction-topline">
             <span className="direction-icon projects-icon"><Layers3 size={19} /></span>
             <ChevronRight size={17} className="card-chevron" />
@@ -1591,13 +1632,14 @@ function NotificationsSheet({
 
 function MainMenuSheet({
   onClose,
+  onOpenSettings,
   onSelect,
 }: {
   onClose: () => void;
+  onOpenSettings: () => void;
   onSelect: (label: string) => void;
 }) {
   const items = [
-    { label: "Настройки интерфейса", icon: Settings2 },
     { label: "Экспорт данных", icon: BriefcaseBusiness },
     { label: "О приложении", icon: CircleAlert },
   ];
@@ -1610,11 +1652,90 @@ function MainMenuSheet({
           <button className="close-button" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="action-grid">
+          <button className="action-choice" onClick={onOpenSettings}>
+            <span><Settings2 size={17} /></span>
+            Настройки интерфейса
+            <ChevronRight size={16} className="choice-chevron" />
+          </button>
           {items.map(({ label, icon: Icon }) => (
             <button className="action-choice" key={label} onClick={() => onSelect(label)}>
               <span><Icon size={17} /></span>
               {label}
               <ChevronRight size={16} className="choice-chevron" />
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InterfaceSettingsSheet({
+  theme,
+  onThemeChange,
+  onClose,
+}: {
+  theme: ThemePreference;
+  onThemeChange: (theme: ThemePreference) => void;
+  onClose: () => void;
+}) {
+  const options: Array<{
+    value: ThemePreference;
+    label: string;
+    detail: string;
+    icon: LucideIcon;
+  }> = [
+    {
+      value: "system",
+      label: "Системная",
+      detail: "Следует настройкам устройства",
+      icon: Monitor,
+    },
+    {
+      value: "light",
+      label: "Светлая",
+      detail: "Всегда светлое оформление",
+      icon: Sun,
+    },
+    {
+      value: "dark",
+      label: "Тёмная",
+      detail: "Всегда тёмное оформление",
+      icon: Moon,
+    },
+  ];
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <section
+        className="bottom-sheet settings-sheet"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Внешний вид</span>
+            <h2>Настройки интерфейса</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="theme-options">
+          {options.map(({ value, label, detail, icon: Icon }) => (
+            <button
+              key={value}
+              className={`theme-option ${theme === value ? "active" : ""}`}
+              onClick={() => onThemeChange(value)}
+            >
+              <span className="theme-icon"><Icon size={17} /></span>
+              <span>
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </span>
+              <span className="theme-radio">
+                {theme === value && <Check size={13} />}
+              </span>
             </button>
           ))}
         </div>

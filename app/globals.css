@@ -192,6 +192,18 @@ h1 {
   color: white;
 }
 .clients-card p { color: rgba(255,255,255,.68); }
+.finance-card {
+  border-color: rgba(40,128,76,.12);
+  background: linear-gradient(145deg, #e6f6eb, #d4efdd);
+  color: #174b2d;
+}
+.finance-card p { color: rgba(23,75,45,.62); }
+.directions-card {
+  border-color: rgba(194,91,69,.12);
+  background: linear-gradient(145deg, #ffebe6, #f9d8cf);
+  color: #6b3026;
+}
+.directions-card p { color: rgba(107,48,38,.62); }
 .direction-icon {
   display: grid;
   width: 36px;
@@ -206,13 +218,15 @@ h1 {
   color: var(--blue);
 }
 .direction-card:not(.clients-card) .finance-icon {
-  background: #eaf8ee;
-  color: #248c43;
+  background: rgba(255,255,255,.66);
+  color: #27844a;
 }
 .direction-card:not(.clients-card) .projects-icon {
-  background: #f0ecff;
-  color: var(--purple);
+  background: rgba(255,255,255,.62);
+  color: #c55f49;
 }
+.finance-card .card-chevron { color: rgba(23,75,45,.45); }
+.directions-card .card-chevron { color: rgba(107,48,38,.45); }
 .direction-arrow { color: rgba(255,255,255,.7); }
 .soon-chip {
   padding: 4px 7px;
@@ -1017,6 +1031,51 @@ h1 {
 .notification-list strong { font-size: 11px; }
 .notification-list small { margin-top: 2px; color: var(--secondary); font-size: 9px; }
 .notification-list > button > svg { color: var(--tertiary); }
+.theme-options {
+  display: grid;
+  gap: 7px;
+  margin-top: 17px;
+}
+.theme-option {
+  display: grid;
+  width: 100%;
+  min-height: 59px;
+  grid-template-columns: 34px 1fr 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: .5px solid var(--separator);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: left;
+}
+.theme-option.active {
+  border-color: rgba(10,105,216,.38);
+  background: var(--blue-soft);
+}
+.theme-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--secondary);
+}
+.theme-option.active .theme-icon { background: var(--surface); color: var(--blue); }
+.theme-option strong, .theme-option small { display: block; }
+.theme-option strong { font-size: 11px; }
+.theme-option small { margin-top: 2px; color: var(--secondary); font-size: 9px; }
+.theme-radio {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--separator);
+  border-radius: 50%;
+  color: white;
+}
+.theme-option.active .theme-radio { border-color: var(--blue); background: var(--blue); }
 .toast-message {
   position: fixed;
   z-index: 80;
@@ -1183,8 +1242,46 @@ h1 {
   .bottom-sheet, .review-sheet { width: 520px; margin: 0 auto; }
 }
 
+.app-shell[data-theme="dark"] {
+  --bg: #000;
+  --surface: #1c1c1e;
+  --surface-soft: #2c2c2e;
+  --text: #f5f5f7;
+  --secondary: #98989f;
+  --tertiary: #6e6e73;
+  --separator: rgba(84,84,88,.55);
+  --blue-soft: rgba(10,105,216,.19);
+  color-scheme: dark;
+}
+.app-shell[data-theme="dark"] .topbar { background: rgba(0,0,0,.82); }
+.app-shell[data-theme="dark"] .notification-dot { border-color: #000; }
+.app-shell[data-theme="dark"] .tabbar { background: rgba(22,22,24,.9); }
+.app-shell[data-theme="dark"] .action-button { border-color: rgba(22,22,24,.95); }
+.app-shell[data-theme="dark"] .clients-card {
+  background: linear-gradient(145deg, #0876e6, #0753a9);
+}
+.app-shell[data-theme="dark"] .finance-card {
+  border-color: rgba(91,182,122,.2);
+  background: linear-gradient(145deg, #183d2a, #112f21);
+  color: #c9f1d6;
+}
+.app-shell[data-theme="dark"] .finance-card p { color: rgba(201,241,214,.62); }
+.app-shell[data-theme="dark"] .finance-card .card-chevron { color: rgba(201,241,214,.45); }
+.app-shell[data-theme="dark"] .directions-card {
+  border-color: rgba(242,139,118,.2);
+  background: linear-gradient(145deg, #4b2823, #38201c);
+  color: #ffd7cf;
+}
+.app-shell[data-theme="dark"] .directions-card p { color: rgba(255,215,207,.62); }
+.app-shell[data-theme="dark"] .directions-card .card-chevron { color: rgba(255,215,207,.45); }
+.app-shell[data-theme="dark"] .metric-primary {
+  background: linear-gradient(145deg, #37373b, #252527);
+}
+.app-shell[data-theme="dark"] .proposal-accepted { background: rgba(52,199,89,.1); }
+.app-shell[data-theme="dark"] .action-choice:active { background: #2c2c2e; }
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  .app-shell[data-theme="system"] {
     --bg: #000;
     --surface: #1c1c1e;
     --surface-soft: #2c2c2e;
@@ -1193,22 +1290,34 @@ h1 {
     --tertiary: #6e6e73;
     --separator: rgba(84,84,88,.55);
     --blue-soft: rgba(10,105,216,.19);
+    color-scheme: dark;
   }
-  html, body { background: #000; }
-  .topbar { background: rgba(0,0,0,.82); }
-  .notification-dot { border-color: #000; }
-  .tabbar { background: rgba(22,22,24,.9); }
-  .action-button { border-color: rgba(22,22,24,.95); }
-  .direction-card, .metric-card, .info-card, .attention-panel, .today-panel,
-  .summary-card, .client-card, .current-task-card, .transcript-preview,
-  .proposal-card, .action-grid, .action-choice, .draft-sheet textarea {
-    background: var(--surface);
+  .app-shell[data-theme="system"] .topbar { background: rgba(0,0,0,.82); }
+  .app-shell[data-theme="system"] .notification-dot { border-color: #000; }
+  .app-shell[data-theme="system"] .tabbar { background: rgba(22,22,24,.9); }
+  .app-shell[data-theme="system"] .action-button { border-color: rgba(22,22,24,.95); }
+  .app-shell[data-theme="system"] .clients-card {
+    background: linear-gradient(145deg, #0876e6, #0753a9);
   }
-  .clients-card { background: linear-gradient(145deg, #0876e6, #0753a9); }
-  .metric-primary { background: linear-gradient(145deg, #37373b, #252527); }
-  .proposal-accepted { background: rgba(52,199,89,.1); }
-  .action-choice:active { background: #2c2c2e; }
-  .soon-chip { background: var(--surface-soft); }
+  .app-shell[data-theme="system"] .finance-card {
+    border-color: rgba(91,182,122,.2);
+    background: linear-gradient(145deg, #183d2a, #112f21);
+    color: #c9f1d6;
+  }
+  .app-shell[data-theme="system"] .finance-card p { color: rgba(201,241,214,.62); }
+  .app-shell[data-theme="system"] .finance-card .card-chevron { color: rgba(201,241,214,.45); }
+  .app-shell[data-theme="system"] .directions-card {
+    border-color: rgba(242,139,118,.2);
+    background: linear-gradient(145deg, #4b2823, #38201c);
+    color: #ffd7cf;
+  }
+  .app-shell[data-theme="system"] .directions-card p { color: rgba(255,215,207,.62); }
+  .app-shell[data-theme="system"] .directions-card .card-chevron { color: rgba(255,215,207,.45); }
+  .app-shell[data-theme="system"] .metric-primary {
+    background: linear-gradient(145deg, #37373b, #252527);
+  }
+  .app-shell[data-theme="system"] .proposal-accepted { background: rgba(52,199,89,.1); }
+  .app-shell[data-theme="system"] .action-choice:active { background: #2c2c2e; }
 }
 
 @media (prefers-reduced-motion: reduce) {
