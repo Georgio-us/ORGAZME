@@ -786,16 +786,72 @@ export default function Home() {
   };
 
   const setProposal = (id: string, state: ProposalState) => {
-    setProposalStates((current) => ({ ...current, [id]: state }));
+    setProposalStates((current) => {
+      const next = { ...current, [id]: state };
+      const proposal = aiProposalsList.find((item) => item.id === id);
+      if (!proposal) return next;
+      if (
+        state === "accepted" &&
+        proposal.kind !== "client_create" &&
+        proposal.clientRef
+      ) {
+        const parent = aiProposalsList.find(
+          (item) =>
+            item.kind === "client_create" &&
+            item.clientRef === proposal.clientRef,
+        );
+        if (parent) next[parent.id] = "accepted";
+      }
+      if (proposal.kind === "client_create" && state !== "accepted") {
+        aiProposalsList
+          .filter(
+            (item) =>
+              item.kind !== "client_create" &&
+              item.clientRef === proposal.clientRef &&
+              next[item.id] === "accepted",
+          )
+          .forEach((item) => {
+            next[item.id] = "pending";
+          });
+      }
+      return next;
+    });
+  };
+
+  const discardAIReview = async () => {
+    if (aiProposalsList.length > 0) {
+      try {
+        await fetch("/api/ai/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            decisions: aiProposalsList.map((proposal) => ({
+              id: proposal.id,
+              status: "rejected",
+            })),
+          }),
+        });
+      } catch {
+        // Закрытие интерфейса не должно зависеть от очистки pending-записей.
+      }
+    }
+    setVoiceState("idle");
+    setVoiceIntent(null);
+    setProposalStates({});
+    setAiTranscript("");
+    setAiProposalsList([]);
+    setAiCoverage(null);
+    setAiAnalysis(null);
   };
 
   const applyProposals = async (editedTitles: Record<string, string>) => {
     try {
-      const decisions = aiProposalsList
-        .filter((proposal) => proposalStates[proposal.id] !== "pending")
-        .map((proposal) => ({
+      const decisions = aiProposalsList.map((proposal) => ({
           id: proposal.id,
-          status: proposalStates[proposal.id] as "accepted" | "rejected",
+          status:
+            proposalStates[proposal.id] === "accepted"
+              ? ("accepted" as const)
+              : ("rejected" as const),
           title: editedTitles[proposal.id],
           clientId: proposal.clientId,
         }));
@@ -1088,8 +1144,7 @@ export default function Home() {
           onCancel={cancelRecording}
           onStop={stopRecording}
           onRetry={() => {
-            setVoiceState("idle");
-            setVoiceIntent(null);
+            void discardAIReview();
           }}
           onApply={applyProposals}
         />
@@ -3421,6 +3476,23 @@ function VoiceOverlay({
                 .join(" · ") || proposal.financeChange.title
             : proposal.contextChange
               ? proposal.contextChange.value
+              : proposal.clientPatch
+                ? [
+                    proposal.clientPatch.status
+                      ? `Статус: ${proposal.clientPatch.status}`
+                      : null,
+                    proposal.clientPatch.attention
+                      ? `Внимание: ${proposal.clientPatch.attention}`
+                      : null,
+                    proposal.clientPatch.nextAction
+                      ? `Следующее действие: ${proposal.clientPatch.nextAction}`
+                      : null,
+                    proposal.clientPatch.amount
+                      ? `Сумма: ${proposal.clientPatch.amount}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
               : proposal.dueAt
                 ? new Intl.DateTimeFormat("ru-RU", {
                     dateStyle: "medium",
@@ -3444,6 +3516,23 @@ function VoiceOverlay({
       const parent = createdClientsByRef.get(card.clientRef);
       return !parent || proposals[parent.id] !== "accepted";
     });
+    const confirmationBlockedFor = (card: (typeof cards)[number]) =>
+      card.kind === "client_create"
+        ? !card.clientRef || !card.clientDraft?.name.trim()
+        : (!card.clientId && !card.clientRef) ||
+          (card.kind === "client_update" &&
+            [card.clientPatch, card.contextChange, card.financeChange].filter(
+              Boolean,
+            ).length !== 1);
+    const selectableCards = cards.filter(
+      (card) => !confirmationBlockedFor(card),
+    );
+    const acceptedCount = cards.filter(
+      (card) => proposals[card.id] === "accepted",
+    ).length;
+    const allSelectableAccepted =
+      selectableCards.length > 0 &&
+      selectableCards.every((card) => proposals[card.id] === "accepted");
     return (
       <div className="overlay voice-overlay">
         <section className="review-sheet">
@@ -3482,22 +3571,30 @@ function VoiceOverlay({
               ))}
             </div>
           )}
+          <div className="proposal-selection-bar">
+            <span>
+              Выбрано {acceptedCount} из {cards.length}
+            </span>
+            <button
+              onClick={() =>
+                selectableCards.forEach((card) =>
+                  onProposal(
+                    card.id,
+                    allSelectableAccepted ? "pending" : "accepted",
+                  ),
+                )
+              }
+            >
+              {allSelectableAccepted ? "Снять выбор" : "Выбрать всё"}
+            </button>
+          </div>
           <div className="proposal-list">
             {cards.map((card) => {
               const status = proposals[card.id] ?? "pending";
               const linkedClient = card.clientRef
                 ? createdClientsByRef.get(card.clientRef)
                 : undefined;
-              const confirmationBlocked =
-                card.kind === "client_create"
-                  ? !card.clientRef || !card.clientDraft?.name.trim()
-                  : (!card.clientId && !card.clientRef) ||
-                    (card.kind === "client_update" &&
-                      [
-                        card.clientPatch,
-                        card.contextChange,
-                        card.financeChange,
-                      ].filter(Boolean).length !== 1);
+              const confirmationBlocked = confirmationBlockedFor(card);
               return (
                 <article
                   className={`proposal-card proposal-${status}`}
@@ -3592,10 +3689,17 @@ function VoiceOverlay({
                       <Pencil size={12} />
                     </button>
                     <button
-                      className="accept"
+                      className={`accept ${status === "accepted" ? "selected" : ""}`}
                       disabled={confirmationBlocked}
-                      onClick={() => onProposal(card.id, "accepted")}
-                      aria-label="Подтвердить"
+                      onClick={() =>
+                        onProposal(
+                          card.id,
+                          status === "accepted" ? "pending" : "accepted",
+                        )
+                      }
+                      aria-label={
+                        status === "accepted" ? "Снять выбор" : "Подтвердить"
+                      }
                     >
                       <Check size={14} />
                     </button>
@@ -3607,13 +3711,11 @@ function VoiceOverlay({
           <button
             className="primary-button"
             disabled={
-              Object.keys(proposals).length === 0 ||
-              Object.values(proposals).some((value) => value === "pending") ||
-              hasBrokenDependencies
+              acceptedCount === 0 || hasBrokenDependencies
             }
             onClick={() => onApply(editedTitles)}
           >
-            Применить решения
+            Сохранить выбранное · {acceptedCount}
           </button>
           {hasBrokenDependencies && (
             <p className="proposal-dependency-error">

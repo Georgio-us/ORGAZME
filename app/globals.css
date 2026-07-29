@@ -1620,6 +1620,28 @@ h1 {
 }
 .coverage-warning strong { color: var(--red); font-size: 11px; }
 .coverage-warning p { margin-top: 5px; color: var(--secondary); font-size: 11px; line-height: 1.4; }
+.proposal-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 1px 10px;
+}
+.proposal-selection-bar span {
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 620;
+}
+.proposal-selection-bar button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--blue) 11%, var(--surface));
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 680;
+}
 .proposal-list { display: grid; gap: 7px; margin: 10px 0 15px; }
 .proposal-card {
   display: grid;
@@ -1706,6 +1728,10 @@ h1 {
   color: var(--secondary);
 }
 .proposal-actions .accept { background: rgba(52,199,89,.12); color: #1d9b3e; }
+.proposal-actions .accept.selected {
+  background: var(--green);
+  color: white;
+}
 .proposal-actions .reject { background: rgba(255,59,48,.1); color: var(--red); }
 .proposal-actions .restore { background: rgba(0,122,255,.12); color: var(--blue); }
 

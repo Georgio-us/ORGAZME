@@ -360,8 +360,43 @@ export async function POST(request: NextRequest) {
     const selectedClient =
       clientsContext.find((client) => client.id === requestedClientId) ?? null;
     const now = new Date().toISOString();
+    const normalizedTranscript = transcript.toLocaleLowerCase("ru");
+    const relevantClientIds = new Set(
+      clientsContext
+        .filter((client) => {
+          if (client.id === selectedClient?.id) return true;
+          const meaningfulNameParts = client.name
+            .toLocaleLowerCase("ru")
+            .split(/[^\p{L}\p{N}]+/u)
+            .filter((part) => part.length >= 4);
+          return meaningfulNameParts.some((part) =>
+            normalizedTranscript.includes(part),
+          );
+        })
+        .map((client) => client.id),
+    );
+    const clientsForPrompt = clientsContext.map((client) =>
+      relevantClientIds.has(client.id)
+        ? client
+        : {
+            id: client.id,
+            name: client.name,
+            category: client.category,
+            status: client.status,
+            attention: client.attention,
+            nextAction: client.nextAction,
+            lastContactAt: client.lastContactAt,
+            amount: client.amount,
+          },
+    );
 
     const wordCount = transcript.split(/\s+/u).filter(Boolean).length;
+    const clauseCount =
+      (transcript.match(/[.!?;]|\s(?:и|также|дальше|потом|кроме того)\s/giu) ??
+        []).length;
+    const amountCount =
+      (transcript.match(/\d[\d\s.,]*\s*(?:евро|доллар|€|\$)/giu) ?? [])
+        .length;
     const isDeepAnalysis =
       wordCount >= 24 ||
       /(?:финанс|деньг|евро|доллар|оплат|получ|долж|чек|доход|апсел|upsell|проект|клиент.{0,30}(?:задач|встреч|событ))/iu.test(
@@ -369,12 +404,15 @@ export async function POST(request: NextRequest) {
       ) ||
       (transcript.match(/(?:\sи\s|также|потом|дальше|кроме того)/giu) ?? [])
         .length >= 2;
+    const needsExtendedReasoning =
+      wordCount >= 120 || clauseCount >= 10 || amountCount >= 6;
     const interpreterModel = isDeepAnalysis
       ? process.env.OPENAI_COMPLEX_MODEL ?? "gpt-5.6-sol"
       : process.env.OPENAI_FAST_MODEL ??
         process.env.OPENAI_MODEL ??
         "gpt-5.6-terra";
-    const reasoningEffort = isDeepAnalysis ? "medium" : "low";
+    const reasoningEffort =
+      isDeepAnalysis && needsExtendedReasoning ? "medium" : "low";
 
     const response = await openai.responses.create({
       model: interpreterModel,
@@ -394,6 +432,7 @@ export async function POST(request: NextRequest) {
 
 Правила клиентов:
 - Если пользователь явно просит создать нового клиента, создай предложение kind=client_create. title и clientDraft.name — точное имя клиента. Дай ему уникальный clientRef вида new_client_1. clientId=null.
+- В имени клиента сохраняй только собственное название. Обороты "клиент по имени X", "название X", "агентство недвижимости X" не являются частью имени, если пользователь не включил их в само название.
 - Все действия для этого нового клиента (встреча, задача, контакт, событие, заметка, обновление) должны иметь тот же clientRef и clientId=null.
 - Для существующего клиента используй только точный id из knownClients, clientRef=null. Не создавай дубль, если имя уверенно совпадает.
 - client_create: clientDraft обязателен, clientPatch=null, dueAt=null. По умолчанию category=active, status="active", attention="calm"; неизвестные поля оставляй null.
@@ -403,7 +442,7 @@ export async function POST(request: NextRequest) {
   3) financeChange — одна финансовая запись.
 - Для client_create clientDraft обязателен, остальные изменения null. Полный контекст нового клиента передавай отдельными client_update с тем же clientRef.
 - Для событий clientDraft, clientPatch, contextChange и financeChange равны null.
-- knownClients содержит подтверждённый структурированный context и recentEvents. Используй их как фактическую память системы: не противоречь им и не дублируй уже существующие открытые действия.
+- knownClients содержит полный контекст релевантных клиентов и краткий индекс остальных. Используй доступные подтверждённые данные как фактическую память системы: не противоречь им и не дублируй уже существующие открытые действия.
 
 Правила контекста:
 - contextChange.field выбирай по точному смыслу. title — короткое читаемое имя факта, value — полное содержание без потери нюансов.
@@ -413,6 +452,7 @@ export async function POST(request: NextRequest) {
 Правила финансов:
 - contract_value — стоимость согласованной работы; payment_received — уже полученные деньги; receivable — подтверждённый долг клиента; expected_revenue — ожидаемое согласованное продление; opportunity — потенциальный апсейл; recurring_fee — регулярный чек; reimbursement — возмещение расходов.
 - Не смешивай несколько сумм в одной карточке. Каждая сумма/валюта/назначение — отдельный financeChange.
+- Валюту переноси буквально: евро=EUR, доллары=USD. Никогда не заменяй названную валюту другой.
 - valueMode=set_total, если пользователь явно сообщает общий итог ("всего получил", "остаток долга"). increment — новое поступление/увеличение. record — отдельная запись, которая не должна трактоваться как общий итог.
 - amountQualifier=from/up_to отражает "от"/"до"; exact — точная сумма. Ничего не вычисляй, если пользователь этого не сказал однозначно.
 
@@ -432,7 +472,7 @@ requiresClarification=true только когда без уточнения н�
             timeZone: "Europe/Madrid",
             intent: intent || "general",
             selectedClient,
-            knownClients: clientsContext,
+            knownClients: clientsForPrompt,
             transcript,
           }),
         },
@@ -455,9 +495,51 @@ requiresClarification=true только когда без уточнения н�
       };
       proposals: ParsedProposal[];
     };
+    const expandedProposals = parsed.proposals.flatMap((proposal) => {
+      if (proposal.kind !== "client_update") return [proposal];
+      const patchHasValue =
+        proposal.clientPatch &&
+        Object.values(proposal.clientPatch).some(
+          (value) =>
+            value !== null &&
+            value !== undefined &&
+            (typeof value !== "string" || value.trim().length > 0),
+        );
+      const normalizedPatch = patchHasValue ? proposal.clientPatch : null;
+      const changes: ParsedProposal[] = [];
+      if (normalizedPatch) {
+        changes.push({
+          ...proposal,
+          clientPatch: normalizedPatch,
+          contextChange: null,
+          financeChange: null,
+        });
+      }
+      if (proposal.contextChange) {
+        changes.push({
+          ...proposal,
+          title: proposal.contextChange.title || proposal.title,
+          clientPatch: null,
+          contextChange: proposal.contextChange,
+          financeChange: null,
+        });
+      }
+      if (proposal.financeChange) {
+        changes.push({
+          ...proposal,
+          title: proposal.financeChange.title || proposal.title,
+          clientPatch: null,
+          contextChange: null,
+          financeChange: proposal.financeChange,
+        });
+      }
+      return changes.length > 0
+        ? changes
+        : [{ ...proposal, clientPatch: normalizedPatch }];
+    });
     const knownClientIds = new Set(clientsContext.map((client) => client.id));
     const proposedClientRefs = new Set(
-      parsed.proposals
+      expandedProposals
         .filter(
           (proposal) =>
             proposal.kind === "client_create" &&
@@ -466,7 +548,7 @@ requiresClarification=true только когда без уточнения н�
         )
         .map((proposal) => proposal.clientRef as string),
     );
-    const normalizedProposals = parsed.proposals.map((proposal) => {
+    const normalizedProposals = expandedProposals.map((proposal) => {
       const contextualClientId = selectedClient?.id ?? null;
       const proposedClientId =
         proposal.kind === "client_create"
