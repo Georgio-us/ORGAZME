@@ -154,6 +154,160 @@ const indicatorLabels = {
   calm: "Нет срочных действий",
 };
 
+type ContextRecord = Record<string, unknown>;
+
+type ClientFinance = {
+  currency: string;
+  received: number;
+  outstanding: number;
+  expected: number;
+  potential: number;
+  receivables: ContextRecord[];
+  opportunities: ContextRecord[];
+};
+
+function asRecord(value: unknown): ContextRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as ContextRecord)
+    : {};
+}
+
+function asRecords(value: unknown): ContextRecord[] {
+  return Array.isArray(value) ? value.map(asRecord) : [];
+}
+
+function asText(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function moneyLabel(value: number, currency: string) {
+  const symbol = currency === "EUR" ? "€" : currency === "USD" ? "$" : currency;
+  return `${symbol}${Math.round(value).toLocaleString("ru-RU")}`;
+}
+
+function getClientFinance(client: Client): ClientFinance {
+  const financial = asRecord(client.context.financial);
+  const currency = asText(financial.currency, "EUR");
+  const outstanding =
+    asNumber(financial.outstanding) || asNumber(financial.totalReceivable);
+  let receivables = asRecords(financial.receivables);
+  if (receivables.length === 0) {
+    const derived: ContextRecord[] = [];
+    const projectOutstanding = asNumber(financial.projectOutstanding);
+    if (projectOutstanding > 0) {
+      derived.push({
+        title: "Остаток по основному проекту",
+        amount: projectOutstanding,
+        status: "due",
+      });
+    }
+    asRecords(financial.reimbursements)
+      .filter((item) => asText(item.status) === "due")
+      .forEach((item) => derived.push(item));
+    if (derived.length === 0 && outstanding > 0) {
+      derived.push({
+        title: "Подтверждённая задолженность",
+        amount: outstanding,
+        status: "due",
+      });
+    }
+    receivables = derived;
+  }
+  const scenarioOptions = asRecords(
+    asRecord(client.context.upsellScenarios).options,
+  );
+  return {
+    currency,
+    received: asNumber(financial.received),
+    outstanding,
+    expected: asNumber(financial.expectedRenewalRevenue),
+    potential:
+      asNumber(financial.potentialUpsellTotal) ||
+      asNumber(financial.knownPotentialUpsellMinimum),
+    receivables,
+    opportunities: [
+      ...asRecords(client.context.upsells),
+      ...scenarioOptions,
+    ],
+  };
+}
+
+function shortDate(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return asText(value);
+  }
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${value}T12:00:00`));
+}
+
+function getEngagements(client: Client) {
+  return asRecords(client.context.engagements);
+}
+
+function getPrimaryContact(client: Client) {
+  const relationship = asRecord(client.context.relationship);
+  return asRecord(relationship.primaryContact);
+}
+
+function opportunityAmount(item: ContextRecord, currency: string) {
+  const amount =
+    asNumber(item.amount) ||
+    asNumber(item.amountFrom) ||
+    asNumber(item.amountUpTo);
+  if (!amount) return "Сумма уточняется";
+  if (asNumber(item.amountFrom)) return `от ${moneyLabel(amount, currency)}`;
+  if (asNumber(item.amountUpTo)) return `до ${moneyLabel(amount, currency)}`;
+  const suffix = item.billing === "monthly" ? " / мес." : "";
+  return `${moneyLabel(amount, currency)}${suffix}`;
+}
+
+function aggregateFinances(clients: Client[]) {
+  const totals = new Map<
+    string,
+    { received: number; outstanding: number; expected: number; potential: number }
+  >();
+  clients.forEach((client) => {
+    const finance = getClientFinance(client);
+    const current = totals.get(finance.currency) ?? {
+      received: 0,
+      outstanding: 0,
+      expected: 0,
+      potential: 0,
+    };
+    current.received += finance.received;
+    current.outstanding += finance.outstanding;
+    current.expected += finance.expected;
+    current.potential += finance.potential;
+    totals.set(finance.currency, current);
+  });
+  return [...totals.entries()]
+    .filter(([, total]) =>
+      Boolean(
+        total.received ||
+          total.outstanding ||
+          total.expected ||
+          total.potential,
+      ),
+    )
+    .sort(([left]) => (left === "EUR" ? -1 : 1));
+}
+
+function totalsLabel(
+  totals: ReturnType<typeof aggregateFinances>,
+  key: "received" | "outstanding" | "expected" | "potential",
+) {
+  const parts = totals
+    .filter(([, value]) => value[key] > 0)
+    .map(([currency, value]) => moneyLabel(value[key], currency));
+  return parts.length ? parts.join(" · ") : "0";
+}
+
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("home");
   const [clientsView, setClientsView] = useState<ClientsView>("dashboard");
@@ -664,6 +818,7 @@ export default function Home() {
       <section className="workspace">
         {screen === "home" && (
           <HomeScreen
+            clients={clientRecords}
             clientCount={clientRecords.length}
             overdueCount={overdueTaskCount}
             attentionCount={
@@ -744,14 +899,18 @@ export default function Home() {
         {screen === "finances" && (
           <FinanceScreen
             view={financeView}
+            clients={clientRecords}
             onViewChange={setFinanceView}
+            onOpenClient={openClient}
           />
         )}
 
         {screen === "directions" && (
           <DirectionsScreen
             view={directionsView}
+            clients={clientRecords}
             onViewChange={setDirectionsView}
+            onOpenClient={openClient}
           />
         )}
       </section>
@@ -1020,6 +1179,7 @@ function ActionChoice({
 }
 
 function HomeScreen({
+  clients,
   clientCount,
   overdueCount,
   attentionCount,
@@ -1029,6 +1189,7 @@ function HomeScreen({
   onFinances,
   onDirections,
 }: {
+  clients: Client[];
   clientCount: number;
   overdueCount: number;
   attentionCount: number;
@@ -1038,6 +1199,18 @@ function HomeScreen({
   onFinances: () => void;
   onDirections: () => void;
 }) {
+  const homeTotals = aggregateFinances(clients);
+  const homeProjectCount = clients.reduce(
+    (total, client) =>
+      total +
+      getEngagements(client).length +
+      (Object.keys(asRecord(client.context.project)).length ? 1 : 0),
+    0,
+  );
+  const homeOpportunityCount = clients.reduce(
+    (total, client) => total + getClientFinance(client).opportunities.length,
+    0,
+  );
   const dateLabel = new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Madrid",
     weekday: "long",
@@ -1078,7 +1251,10 @@ function HomeScreen({
           </div>
           <div>
             <h2>Финансы</h2>
-            <p>Факт · план · возможности</p>
+            <p>
+              {totalsLabel(homeTotals, "received")} получено ·{" "}
+              {totalsLabel(homeTotals, "outstanding")} к получению
+            </p>
           </div>
         </button>
 
@@ -1092,7 +1268,9 @@ function HomeScreen({
           </div>
           <div>
             <h2>Направления</h2>
-            <p>Проекты, развитие и идеи</p>
+            <p>
+              {homeProjectCount} проектов · {homeOpportunityCount} возможностей
+            </p>
           </div>
         </button>
       </div>
@@ -1149,11 +1327,44 @@ function HomeScreen({
 
 function FinanceScreen({
   view,
+  clients,
   onViewChange,
+  onOpenClient,
 }: {
   view: FinanceView;
+  clients: Client[];
   onViewChange: (view: FinanceView) => void;
+  onOpenClient: (client: Client) => void;
 }) {
+  const totals = aggregateFinances(clients);
+  const receivables = clients.flatMap((client) => {
+    const finance = getClientFinance(client);
+    return finance.receivables.map((item) => ({
+      client,
+      currency: finance.currency,
+      title: asText(item.title, "Обязательство"),
+      amount: asNumber(item.amount),
+    }));
+  });
+  const opportunities = clients.flatMap((client) => {
+    const finance = getClientFinance(client);
+    return finance.opportunities.map((item) => ({
+      client,
+      currency: finance.currency,
+      item,
+    }));
+  });
+  const financialClients = clients.filter((client) => {
+    const finance = getClientFinance(client);
+    return Boolean(
+      finance.received ||
+        finance.outstanding ||
+        finance.expected ||
+        finance.opportunities.length ||
+        getEngagements(client).length,
+    );
+  });
+
   return (
     <div className="screen finance-screen">
       <div className="section-heading">
@@ -1176,20 +1387,48 @@ function FinanceScreen({
               <span>Финансовый контекст</span>
               <TrendingUp size={18} />
             </div>
-            <strong>€0</strong>
-            <small>Данных пока нет</small>
-            <div className="balance-progress"><span style={{ width: "0%" }} /></div>
+            <strong>{totalsLabel(totals, "received")}</strong>
+            <small>Фактически получено по всем клиентам</small>
+            <div className="currency-progress-list">
+              {totals.map(([currency, total]) => {
+                const committed = total.received + total.outstanding;
+                const progress = committed
+                  ? Math.round((total.received / committed) * 100)
+                  : 0;
+                return (
+                  <div key={currency}>
+                    <span>
+                      <b>{currency}</b>
+                      <small>{progress}% получено</small>
+                    </span>
+                    <i>
+                      <em style={{ width: `${progress}%` }} />
+                    </i>
+                  </div>
+                );
+              })}
+            </div>
           </section>
           <div className="finance-metrics">
             <article>
               <span>Получено</span>
-              <strong>€0</strong>
-              <small>0 платежей</small>
+              <strong>{totalsLabel(totals, "received")}</strong>
+              <small>{financialClients.length} клиентов</small>
             </article>
             <article>
-              <span>Ожидается</span>
-              <strong>€0</strong>
-              <small>0 платежей</small>
+              <span>К получению</span>
+              <strong>{totalsLabel(totals, "outstanding")}</strong>
+              <small>{receivables.length} обязательств</small>
+            </article>
+            <article>
+              <span>Продления</span>
+              <strong>{totalsLabel(totals, "expected")}</strong>
+              <small>Ещё не задолженность</small>
+            </article>
+            <article>
+              <span>Возможности</span>
+              <strong>{totalsLabel(totals, "potential")}</strong>
+              <small>{opportunities.length} апсейлов</small>
             </article>
           </div>
           <section className="finance-context-card">
@@ -1198,30 +1437,139 @@ function FinanceScreen({
                 <span className="eyebrow">Контекст</span>
                 <h2>Требует решения</h2>
               </div>
-              <span className="count-pill">0</span>
+              <span className="count-pill">{receivables.length}</span>
             </div>
-            <div className="empty-panel-state">
-              <span className="agenda-icon agenda-blue">
-                <WalletCards size={16} />
-              </span>
-              <div>
-                <strong>Финансовых решений пока нет</strong>
-                <p>Платежи и обязательства появятся после добавления данных.</p>
+            {receivables.length === 0 ? (
+              <div className="empty-panel-state">
+                <span className="agenda-icon agenda-blue">
+                  <WalletCards size={16} />
+                </span>
+                <div>
+                  <strong>Нет открытой задолженности</strong>
+                  <p>Все подтверждённые обязательства закрыты.</p>
+                </div>
               </div>
+            ) : (
+              receivables.map((entry) => (
+                <button
+                  className="finance-decision-row finance-decision-detailed"
+                  key={`${entry.client.id}-${entry.title}`}
+                  onClick={() => onOpenClient(entry.client)}
+                >
+                  <span>
+                    <strong>{entry.title}</strong>
+                    <small>{entry.client.name}</small>
+                  </span>
+                  <b>{moneyLabel(entry.amount, entry.currency)}</b>
+                  <ChevronRight size={15} />
+                </button>
+              ))
+            )}
+          </section>
+          <section className="finance-context-card">
+            <div className="panel-title">
+              <div>
+                <span className="eyebrow">Pipeline</span>
+                <h2>Апсейлы и продления</h2>
+              </div>
+              <span className="count-pill">{opportunities.length}</span>
             </div>
+            {opportunities.slice(0, 6).map(({ client, currency, item }) => (
+              <button
+                className="finance-decision-row finance-decision-detailed"
+                key={`${client.id}-${asText(item.title)}`}
+                onClick={() => onOpenClient(client)}
+              >
+                <span>
+                  <strong>{asText(item.title, "Возможность")}</strong>
+                  <small>{client.name}</small>
+                </span>
+                <b>{opportunityAmount(item, currency)}</b>
+                <ChevronRight size={15} />
+              </button>
+            ))}
           </section>
         </>
       ) : (
-        <div className="transaction-list">
+        <div className="finance-client-list">
           <div className="list-summary">
-            <span>Последние операции</span>
-            <strong>0</strong>
+            <span>Финансы по клиентам</span>
+            <strong>{financialClients.length}</strong>
           </div>
-          <div className="empty-state">
-            <WalletCards size={22} />
-            <strong>Операций пока нет</strong>
-            <span>Здесь будет отображаться финансовая история.</span>
-          </div>
+          {financialClients.map((client) => {
+            const finance = getClientFinance(client);
+            const engagements = getEngagements(client);
+            return (
+              <article className="finance-client-card" key={client.id}>
+                <button onClick={() => onOpenClient(client)}>
+                  <span>
+                    <strong>{client.name}</strong>
+                    <small>{client.status}</small>
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
+                <div className="finance-client-totals">
+                  <span>
+                    Получено
+                    <b>{moneyLabel(finance.received, finance.currency)}</b>
+                  </span>
+                  <span className={finance.outstanding ? "has-debt" : ""}>
+                    К получению
+                    <b>{moneyLabel(finance.outstanding, finance.currency)}</b>
+                  </span>
+                </div>
+                {engagements.map((engagement, index) => {
+                  const periods = asRecords(engagement.periods);
+                  const amount =
+                    asNumber(engagement.amount) ||
+                    asNumber(engagement.monthlyFee);
+                  return (
+                    <div
+                      className="finance-service-block"
+                      key={`${client.id}-${asText(engagement.title)}-${index}`}
+                    >
+                      <div className="finance-service-row">
+                        <div>
+                          <strong>{asText(engagement.title, "Работа")}</strong>
+                          <small>
+                            {periods.length
+                              ? `${periods.length} расчётных периода`
+                              : asText(engagement.status, "В работе")}
+                          </small>
+                        </div>
+                        {amount > 0 && (
+                          <b>{moneyLabel(amount, asText(engagement.currency, finance.currency))}</b>
+                        )}
+                      </div>
+                      {periods.map((period, periodIndex) => (
+                        <div className="finance-period-row" key={periodIndex}>
+                          <span>
+                            {shortDate(period.periodStart ?? period.period)}{" "}
+                            {period.periodEnd
+                              ? `— ${shortDate(period.periodEnd)}`
+                              : ""}
+                          </span>
+                          <small>
+                            получено{" "}
+                            {moneyLabel(
+                              asNumber(period.received),
+                              asText(engagement.currency, finance.currency),
+                            )}
+                            {asNumber(period.outstanding) > 0
+                              ? ` · долг ${moneyLabel(
+                                  asNumber(period.outstanding),
+                                  asText(engagement.currency, finance.currency),
+                                )}`
+                              : ""}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </article>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1230,11 +1578,58 @@ function FinanceScreen({
 
 function DirectionsScreen({
   view,
+  clients,
   onViewChange,
+  onOpenClient,
 }: {
   view: DirectionsView;
+  clients: Client[];
   onViewChange: (view: DirectionsView) => void;
+  onOpenClient: (client: Client) => void;
 }) {
+  const projects = clients.flatMap((client) => {
+    const engagementProjects = getEngagements(client).map((engagement) => ({
+      client,
+      title: asText(engagement.title, "Проект"),
+      detail:
+        asText(engagement.currentFocus) ||
+        asText(engagement.status, client.status),
+    }));
+    const project = asRecord(client.context.project);
+    const product = asRecord(client.context.product);
+    if (Object.keys(project).length) {
+      engagementProjects.unshift({
+        client,
+        title: asText(product.name, "Основной проект"),
+        detail:
+          asText(project.currentStage) ||
+          asText(project.goal, client.status),
+      });
+    }
+    const newBusiness = asRecord(client.context.newBusinessContext);
+    if (Object.keys(newBusiness).length) {
+      const markets = Array.isArray(newBusiness.markets)
+        ? newBusiness.markets.filter((item): item is string => typeof item === "string")
+        : [];
+      engagementProjects.push({
+        client,
+        title: asText(newBusiness.knownDirection, "Новое направление бизнеса"),
+        detail: markets.length
+          ? `Рынки: ${markets.join(", ")}`
+          : asText(newBusiness.stage, client.status),
+      });
+    }
+    return engagementProjects;
+  });
+  const opportunityCount = clients.reduce(
+    (total, client) => total + getClientFinance(client).opportunities.length,
+    0,
+  );
+  const focusClient =
+    clients.find((client) => client.attention === "attention") ??
+    clients.find((client) => client.attention === "active") ??
+    clients[0];
+
   return (
     <div className="screen directions-screen">
       <div className="section-heading">
@@ -1255,42 +1650,72 @@ function DirectionsScreen({
           <div className="metric-grid direction-metrics">
             <article className="metric-card metric-primary">
               <span>Активные</span>
-              <strong>0</strong>
-              <small>направления</small>
+              <strong>{projects.length}</strong>
+              <small>проектов и услуг</small>
             </article>
             <article className="metric-card">
               <span>В фокусе</span>
-              <strong>0</strong>
-              <small>направлений</small>
+              <strong>
+                {clients.filter((client) => client.attention !== "calm").length}
+              </strong>
+              <small>клиентов</small>
             </article>
             <article className="metric-card">
-              <span>Идей</span>
-              <strong>0</strong>
-              <small>в бэклоге</small>
+              <span>Возможности</span>
+              <strong>{opportunityCount}</strong>
+              <small>апсейлов</small>
             </article>
           </div>
           <section className="focus-card">
             <span className="eyebrow">Главный фокус</span>
-            <div className="focus-title">
+            <button
+              className="focus-title focus-title-button"
+              disabled={!focusClient}
+              onClick={() => focusClient && onOpenClient(focusClient)}
+            >
               <span className="direction-icon projects-icon">
                 <BriefcaseBusiness size={18} />
               </span>
               <div>
-                <h2>Фокус не выбран</h2>
-                <p>Добавьте первое направление</p>
+                <h2>{focusClient?.name ?? "Фокус не выбран"}</h2>
+                <p>{focusClient?.status ?? "Добавьте первое направление"}</p>
               </div>
+              <ChevronRight size={16} />
+            </button>
+            <div className="focus-progress">
+              <span style={{ width: focusClient ? "68%" : "0%" }} />
             </div>
-            <div className="focus-progress"><span style={{ width: "0%" }} /></div>
-            <strong>Здесь появится следующее действие по направлению</strong>
+            <strong>
+              {focusClient?.nextAction ??
+                "Здесь появится следующее действие по направлению"}
+            </strong>
           </section>
         </>
       ) : (
         <div className="direction-project-list">
-          <div className="empty-state">
-            <Layers3 size={22} />
-            <strong>Направлений пока нет</strong>
-            <span>Здесь будут отображаться проекты, идеи и развитие.</span>
+          <div className="list-summary">
+            <span>Все проекты и услуги</span>
+            <strong>{projects.length}</strong>
           </div>
+          {projects.map((project, index) => (
+            <button
+              className="project-row"
+              key={`${project.client.id}-${project.title}-${index}`}
+              onClick={() => onOpenClient(project.client)}
+            >
+              <span
+                className={`project-tone ${
+                  index % 3 === 0 ? "blue" : index % 3 === 1 ? "purple" : "green"
+                }`}
+              />
+              <span>
+                <strong>{project.title}</strong>
+                <small>{project.client.name}</small>
+                <p>{project.detail}</p>
+              </span>
+              <ChevronRight size={16} />
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -1763,6 +2188,48 @@ function ClientDashboard({
     typeof client.context.summary === "string" && client.context.summary.trim()
       ? client.context.summary
       : `Статус: ${client.status.toLowerCase()}. Последний контакт — ${client.lastContact}. Следующее действие: ${client.nextAction}.`;
+  const finance = getClientFinance(client);
+  const engagements = getEngagements(client);
+  const opportunities = finance.opportunities;
+  const primaryContact = getPrimaryContact(client);
+  const stakeholders = asRecords(client.context.stakeholders);
+  const relationship = asRecord(client.context.relationship);
+  const project = asRecord(client.context.project);
+  const product = asRecord(client.context.product);
+  const business = asRecord(client.context.business);
+  const location = asRecord(client.context.location);
+  const origin = asRecord(client.context.origin);
+  const workingDynamics = asRecord(client.context.workingDynamics);
+  const newBusiness = asRecord(client.context.newBusinessContext);
+  const tentativePlans = asRecords(client.context.tentativePlans);
+  const priorities = Array.isArray(client.context.priorities)
+    ? client.context.priorities.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const nonBillable = Array.isArray(client.context.nonBillableConsulting)
+    ? client.context.nonBillableConsulting.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const newMarkets = Array.isArray(newBusiness.markets)
+    ? newBusiness.markets.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const relationshipStart =
+    asText(relationship.ongoingWorkStartedAt) ||
+    asText(relationship.startedAt) ||
+    asText(asRecord(relationship.firstContact).date) ||
+    asText(asRecord(relationship.firstContact).period);
+  const businessLabel =
+    asText(business.type) ||
+    asText(business.industry) ||
+    asText(product.type);
+  const locationLabel =
+    asText(business.baseLocation) ||
+    asText(business.region) ||
+    asText(location.country);
 
   return (
     <div className="client-dashboard">
@@ -1829,6 +2296,286 @@ function ClientDashboard({
           <small>Можно изменить вручную</small>
         </article>
       </div>
+
+      {(businessLabel || locationLabel || relationshipStart || asText(origin.initialInterest)) && (
+        <section className="client-detail-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Профиль</span>
+              <h2>Клиент и отношения</h2>
+            </div>
+            <Users size={18} />
+          </div>
+          {businessLabel && (
+            <div className="client-detail-row">
+              <span>
+                <strong>{businessLabel}</strong>
+                <small>{locationLabel || "География не указана"}</small>
+              </span>
+            </div>
+          )}
+          {relationshipStart && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Начало взаимодействия</strong>
+                <small>{shortDate(relationshipStart)}</small>
+              </span>
+            </div>
+          )}
+          {asText(origin.initialInterest) && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Первоначальный интерес</strong>
+                <small>
+                  {asText(origin.initialInterest)} ·{" "}
+                  {asText(origin.status, "Статус не указан")}
+                </small>
+              </span>
+            </div>
+          )}
+        </section>
+      )}
+
+      <section className="client-detail-section client-finance-section">
+        <div className="client-detail-head">
+          <div>
+            <span className="eyebrow">Финансы</span>
+            <h2>Факт и обязательства</h2>
+          </div>
+          <WalletCards size={18} />
+        </div>
+        <div className="client-money-grid">
+          <span>
+            Получено
+            <strong>{moneyLabel(finance.received, finance.currency)}</strong>
+          </span>
+          <span className={finance.outstanding ? "has-debt" : ""}>
+            К получению
+            <strong>{moneyLabel(finance.outstanding, finance.currency)}</strong>
+          </span>
+          {finance.expected > 0 && (
+            <span>
+              Продление
+              <strong>{moneyLabel(finance.expected, finance.currency)}</strong>
+            </span>
+          )}
+          {finance.potential > 0 && (
+            <span>
+              Потенциал
+              <strong>{moneyLabel(finance.potential, finance.currency)}</strong>
+            </span>
+          )}
+        </div>
+        {finance.receivables.map((item, index) => (
+          <div className="client-detail-row" key={`${asText(item.title)}-${index}`}>
+            <span>
+              <strong>{asText(item.title, "Обязательство")}</strong>
+              <small>Открыто к получению</small>
+            </span>
+            <b>{moneyLabel(asNumber(item.amount), finance.currency)}</b>
+          </div>
+        ))}
+      </section>
+
+      {(engagements.length > 0 || Object.keys(project).length > 0) && (
+        <section className="client-detail-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Работа</span>
+              <h2>Проекты и услуги</h2>
+            </div>
+            <BriefcaseBusiness size={18} />
+          </div>
+          {Object.keys(project).length > 0 && (
+            <div className="client-detail-row">
+              <span>
+                <strong>{asText(product.name, "Основной проект")}</strong>
+                <small>
+                  {asText(project.currentStage) || asText(project.goal)}
+                </small>
+              </span>
+            </div>
+          )}
+          {engagements.map((engagement, index) => {
+            const periods = asRecords(engagement.periods);
+            const deliverables = Array.isArray(engagement.deliverables)
+              ? engagement.deliverables.filter(
+                  (item): item is string => typeof item === "string",
+                )
+              : [];
+            return (
+              <div
+                className="client-engagement-block"
+                key={`${asText(engagement.title)}-${index}`}
+              >
+                <div className="client-detail-row">
+                  <span>
+                    <strong>{asText(engagement.title, "Работа")}</strong>
+                    <small>
+                      {asText(engagement.currentFocus) ||
+                        (periods.length
+                          ? `${periods.length} расчётных периода`
+                          : asText(engagement.status, "Подтверждено"))}
+                    </small>
+                  </span>
+                  {asNumber(engagement.amount) > 0 && (
+                    <b>
+                      {moneyLabel(
+                        asNumber(engagement.amount),
+                        asText(engagement.currency, finance.currency),
+                      )}
+                    </b>
+                  )}
+                </div>
+                {periods.map((period, periodIndex) => (
+                  <div className="client-period-row" key={periodIndex}>
+                    <span>
+                      {shortDate(period.periodStart ?? period.period)}
+                      {period.periodEnd
+                        ? ` — ${shortDate(period.periodEnd)}`
+                        : ""}
+                    </span>
+                    <small>
+                      Получено{" "}
+                      {moneyLabel(
+                        asNumber(period.received),
+                        asText(engagement.currency, finance.currency),
+                      )}
+                      {asNumber(period.outstanding) > 0
+                        ? ` · к получению ${moneyLabel(
+                            asNumber(period.outstanding),
+                            asText(engagement.currency, finance.currency),
+                          )}`
+                        : ""}
+                    </small>
+                  </div>
+                ))}
+                {deliverables.length > 0 && (
+                  <div className="context-chip-list client-deliverables">
+                    {deliverables.map((item) => (
+                      <span key={item}>{item}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {opportunities.length > 0 && (
+        <section className="client-detail-section client-opportunity-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Pipeline</span>
+              <h2>Апсейлы и развитие</h2>
+            </div>
+            <TrendingUp size={18} />
+          </div>
+          {opportunities.map((item, index) => (
+            <div className="client-detail-row" key={`${asText(item.title)}-${index}`}>
+              <span>
+                <strong>{asText(item.title, "Возможность")}</strong>
+                <small>
+                  {asText(item.nextStep) ||
+                    asText(item.notes) ||
+                    asText(item.stage, "Потенциально")}
+                </small>
+              </span>
+              <b>{opportunityAmount(item, finance.currency)}</b>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {(Object.keys(primaryContact).length > 0 ||
+        stakeholders.length > 0 ||
+        asText(relationship.quality)) && (
+        <section className="client-detail-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Люди</span>
+              <h2>Контакты и зависимости</h2>
+            </div>
+            <Contact size={18} />
+          </div>
+          {Object.keys(primaryContact).length > 0 && (
+            <div className="client-detail-row">
+              <span>
+                <strong>{asText(primaryContact.name, "Основной контакт")}</strong>
+                <small>{asText(primaryContact.role, "Контактное лицо")}</small>
+              </span>
+            </div>
+          )}
+          {stakeholders.map((stakeholder, index) => (
+            <div
+              className="client-detail-row"
+              key={`${asText(stakeholder.name)}-${index}`}
+            >
+              <span>
+                <strong>{asText(stakeholder.name, "Участник")}</strong>
+                <small>
+                  {asText(stakeholder.role)}
+                  {asText(stakeholder.organization)
+                    ? ` · ${asText(stakeholder.organization)}`
+                    : ""}
+                </small>
+              </span>
+            </div>
+          ))}
+          {asText(relationship.quality) && (
+            <p className="client-context-note">{asText(relationship.quality)}</p>
+          )}
+        </section>
+      )}
+
+      {(asText(workingDynamics.primaryBlocker) ||
+        Object.keys(newBusiness).length > 0 ||
+        priorities.length > 0 ||
+        nonBillable.length > 0 ||
+        tentativePlans.length > 0) && (
+        <section className="client-detail-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Контекст</span>
+              <h2>Приоритеты и нюансы</h2>
+            </div>
+            <Sparkles size={18} />
+          </div>
+          {asText(workingDynamics.primaryBlocker) && (
+            <p className="client-context-warning">
+              <strong>Блокер</strong>
+              {asText(workingDynamics.primaryBlocker)}
+            </p>
+          )}
+          {asText(newBusiness.knownDirection) && (
+            <p className="client-context-note">
+              <strong>{asText(newBusiness.knownDirection)}</strong>
+              {newMarkets.length ? ` · ${newMarkets.join(", ")}` : ""}
+            </p>
+          )}
+          {priorities.length > 0 && (
+            <ul className="client-priority-list">
+              {priorities.map((priority) => (
+                <li key={priority}>{priority}</li>
+              ))}
+            </ul>
+          )}
+          {nonBillable.length > 0 && (
+            <div className="context-chip-list">
+              {nonBillable.map((item) => (
+                <span key={item}>{item} · консультация</span>
+              ))}
+            </div>
+          )}
+          {tentativePlans.map((plan, index) => (
+            <p className="client-context-note" key={`${asText(plan.title)}-${index}`}>
+              <strong>{asText(plan.title, "Предварительный план")}</strong>
+              {asText(plan.blocker) || asText(plan.status)}
+            </p>
+          ))}
+        </section>
+      )}
 
       <section className="summary-card">
         <span className="eyebrow">Подтверждённый контекст</span>
