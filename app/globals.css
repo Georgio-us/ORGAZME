@@ -325,57 +325,25 @@ h1 {
 .agenda-copy strong, .agenda-copy small { display: block; }
 .agenda-copy strong { font-size: 11px; font-weight: 650; }
 .agenda-copy small { margin-top: 2px; color: var(--secondary); font-size: 9px; }
-.empty-agenda-list {
-  width: 100%;
+.home-agenda-empty {
+  display: flex;
+  min-height: 112px;
+  justify-content: center;
+  flex-direction: column;
+  padding: 20px 13px 24px;
   border-top: .5px solid var(--separator);
 }
-.empty-agenda-message {
-  min-height: 62px;
-  padding: 12px;
-}
-.empty-agenda-message strong {
+.home-agenda-empty strong {
   display: block;
   color: var(--text);
   font-size: 11px;
   font-weight: 650;
 }
-.empty-agenda-message p {
+.home-agenda-empty p {
   margin-top: 3px;
   color: var(--secondary);
   font-size: 9px;
   line-height: 1.4;
-}
-.agenda-placeholder {
-  display: grid;
-  width: 100%;
-  min-height: 58px;
-  grid-template-columns: 32px minmax(0, 1fr) 38px;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 12px;
-  border-top: .5px solid var(--separator);
-}
-.agenda-placeholder-copy {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-}
-.agenda-placeholder-copy i,
-.placeholder-time {
-  display: block;
-  border-radius: 999px;
-  background: var(--surface-soft);
-}
-.placeholder-title { width: 58%; height: 8px; }
-.placeholder-meta { width: 42%; height: 6px; }
-.placeholder-title-2 { width: 48%; }
-.placeholder-title-3 { width: 66%; }
-.placeholder-meta-2 { width: 35%; }
-.placeholder-meta-3 { width: 50%; }
-.placeholder-time {
-  width: 30px;
-  height: 7px;
-  justify-self: end;
 }
 .empty-context {
   display: flex;

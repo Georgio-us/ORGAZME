@@ -1073,31 +1073,9 @@ function HomeScreen({
           <span className="agenda-count">{agenda.length}</span>
         </div>
         {agenda.length === 0 ? (
-          <div className="empty-agenda-list">
-            <div className="empty-agenda-message">
-              <strong>Пока ничего не запланировано</strong>
-              <p>Здесь появятся задачи, встречи и важные действия.</p>
-            </div>
-            {[
-              { tone: "agenda-danger", icon: CircleAlert },
-              { tone: "agenda-blue", icon: CalendarClock },
-              { tone: "agenda-purple", icon: Sparkles },
-            ].map(({ tone, icon: Icon }, index) => (
-              <div
-                className="agenda-placeholder"
-                key={tone}
-                aria-hidden="true"
-              >
-                <span className={`agenda-icon ${tone}`}>
-                  <Icon size={16} />
-                </span>
-                <span className="agenda-placeholder-copy">
-                  <i className={`placeholder-title placeholder-title-${index + 1}`} />
-                  <i className={`placeholder-meta placeholder-meta-${index + 1}`} />
-                </span>
-                <span className="placeholder-time" />
-              </div>
-            ))}
+          <div className="home-agenda-empty">
+            <strong>Пока ничего не запланировано</strong>
+            <p>Здесь появятся задачи, встречи и важные действия.</p>
           </div>
         ) : (
           agenda.map((item) => {
