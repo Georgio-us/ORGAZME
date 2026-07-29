@@ -16,7 +16,6 @@
   --purple: #7656d8;
   --action-bg: #101114;
   --action-fg: #ffffff;
-  --watermark-stroke: rgba(16,17,20,.085);
   --shadow: 0 8px 28px rgba(35, 38, 47, 0.07);
 }
 
@@ -674,7 +673,6 @@ h1 {
   color: var(--blue);
 }
 .client-card {
-  position: relative;
   display: block;
   width: 100%;
   min-height: 126px;
@@ -683,34 +681,8 @@ h1 {
   border: .5px solid var(--separator);
   border-radius: 16px;
   background: var(--surface);
-  isolation: isolate;
-  overflow: hidden;
   text-align: left;
   transition: transform 110ms ease, opacity 110ms ease;
-}
-.client-card::before {
-  position: absolute;
-  z-index: 0;
-  top: 52%;
-  left: 16px;
-  max-width: calc(100% - 24px);
-  overflow: hidden;
-  color: transparent;
-  content: attr(data-watermark);
-  font-size: clamp(42px, 10vw, 58px);
-  font-weight: 800;
-  letter-spacing: -.055em;
-  line-height: .9;
-  opacity: 1;
-  pointer-events: none;
-  text-transform: uppercase;
-  transform: translateY(-50%);
-  white-space: nowrap;
-  -webkit-text-stroke: 1.2px var(--watermark-stroke);
-}
-.client-card > * {
-  position: relative;
-  z-index: 1;
 }
 .client-card:active { opacity: .72; transform: scale(.99); }
 .client-card h2 { font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
@@ -1291,7 +1263,6 @@ h1 {
   --blue-soft: rgba(38,129,232,.2);
   --action-bg: #f7f7f8;
   --action-fg: #121214;
-  --watermark-stroke: rgba(247,247,248,.1);
   color-scheme: dark;
 }
 .app-shell[data-theme="dark"] .topbar { background: rgba(18,18,20,.88); }
@@ -1331,7 +1302,6 @@ h1 {
     --blue-soft: rgba(38,129,232,.2);
     --action-bg: #f7f7f8;
     --action-fg: #121214;
-    --watermark-stroke: rgba(247,247,248,.1);
     color-scheme: dark;
   }
   .app-shell[data-theme="system"] .topbar { background: rgba(18,18,20,.88); }

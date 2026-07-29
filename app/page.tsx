@@ -1230,7 +1230,6 @@ function ClientsList({
         <button
           className="client-card"
           key={client.id}
-          data-watermark={client.name}
           onClick={() => onOpenClient(client)}
         >
           <div className="client-card-head">
