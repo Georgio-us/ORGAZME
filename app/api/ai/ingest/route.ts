@@ -338,6 +338,8 @@ export async function POST(request: NextRequest) {
       ? "m4a"
       : audio.type.includes("ogg")
         ? "ogg"
+        : audio.type.includes("wav")
+          ? "wav"
         : "webm";
     const transcriptResult = await openai.audio.transcriptions.create({
       file: await toFile(Buffer.from(await audio.arrayBuffer()), `voice.${extension}`, {
