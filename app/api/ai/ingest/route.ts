@@ -14,6 +14,7 @@ const actionKinds = [
   "contact",
   "note",
   "client_update",
+  "client_create",
 ] as const;
 
 type ActionKind = (typeof actionKinds)[number];
@@ -23,7 +24,16 @@ type ParsedProposal = {
   title: string;
   details: string | null;
   clientId: string | null;
+  clientRef: string | null;
   dueAt: string | null;
+  clientDraft: {
+    name: string;
+    category: "active" | "potential";
+    status: string | null;
+    attention: "calm" | "active" | "attention" | "overdue" | null;
+    nextAction: string | null;
+    amount: string | null;
+  } | null;
   clientPatch: {
     status: string | null;
     attention: "calm" | "active" | "attention" | "overdue" | null;
@@ -50,7 +60,9 @@ const responseSchema = {
           "title",
           "details",
           "clientId",
+          "clientRef",
           "dueAt",
+          "clientDraft",
           "clientPatch",
           "requiresClarification",
         ],
@@ -59,9 +71,45 @@ const responseSchema = {
           title: { type: "string" },
           details: { type: ["string", "null"] },
           clientId: { type: ["string", "null"] },
+          clientRef: {
+            type: ["string", "null"],
+            description:
+              "Temporary stable reference such as new_client_1, shared by client_create and its dependent actions.",
+          },
           dueAt: {
             type: ["string", "null"],
             description: "ISO 8601 date with Europe/Madrid offset when known.",
+          },
+          clientDraft: {
+            anyOf: [
+              { type: "null" },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "name",
+                  "category",
+                  "status",
+                  "attention",
+                  "nextAction",
+                  "amount",
+                ],
+                properties: {
+                  name: { type: "string" },
+                  category: {
+                    type: "string",
+                    enum: ["active", "potential"],
+                  },
+                  status: { type: ["string", "null"] },
+                  attention: {
+                    type: ["string", "null"],
+                    enum: ["calm", "active", "attention", "overdue", null],
+                  },
+                  nextAction: { type: ["string", "null"] },
+                  amount: { type: ["string", "null"] },
+                },
+              },
+            ],
           },
           clientPatch: {
             anyOf: [
@@ -168,7 +216,22 @@ export async function POST(request: NextRequest) {
         {
           role: "system",
           content:
-            "Ты — слой интерпретации PBOS ORGAZME. Преобразуй русскую деловую речь в минимальный набор конкретных изменений. Ничего не применяй сам. Используй только clientId из списка. Если клиент не определён уверенно, верни clientId=null и requiresClarification=true. Не выдумывай даты, суммы и факты. Относительные даты считай от переданного now в часовом поясе Europe/Madrid. client_update используй только для изменения карточки клиента; для задач, встреч, контактов, событий и заметок используй соответствующие kind.",
+            `Ты — транзакционный планировщик PBOS ORGAZME. Преобразуй русскую деловую речь в минимальный упорядоченный план изменений, но ничего не применяй сам.
+
+Правила клиентов:
+- Если пользователь явно просит создать нового клиента, создай предложение kind=client_create. title и clientDraft.name — точное имя клиента. Дай ему уникальный clientRef вида new_client_1. clientId=null.
+- Все действия для этого нового клиента (встреча, задача, контакт, событие, заметка, обновление) должны иметь тот же clientRef и clientId=null.
+- Для существующего клиента используй только точный id из knownClients, clientRef=null. Не создавай дубль, если имя уверенно совпадает.
+- client_create: clientDraft обязателен, clientPatch=null, dueAt=null. По умолчанию category=active, status="active", attention="calm"; неизвестные поля оставляй null.
+- client_update используй только для изменения карточки существующего или создаваемого клиента; clientPatch обязателен, clientDraft=null.
+- Для остальных видов clientDraft=null и clientPatch=null.
+
+Правила времени:
+- Относительные даты считай от now в Europe/Madrid.
+- Если названа только встреча/задача и время без даты, выбери ближайшее будущее наступление этого времени: сегодня, если оно ещё не прошло, иначе завтра. Это безопасное рабочее предположение, requiresClarification=false.
+- Не выдумывай время, сумму или деловой факт, которых нет в речи.
+
+requiresClarification=true только когда без уточнения нельзя построить применимое изменение. Каждый зависимый шаг должен ссылаться либо на clientId, либо на валидный clientRef. Верни все явно запрошенные действия отдельными предложениями.`,
         },
         {
           role: "user",
@@ -197,20 +260,46 @@ export async function POST(request: NextRequest) {
       proposals: ParsedProposal[];
     };
     const knownClientIds = new Set(clientsContext.map((client) => client.id));
+    const proposedClientRefs = new Set(
+      parsed.proposals
+        .filter(
+          (proposal) =>
+            proposal.kind === "client_create" &&
+            proposal.clientRef &&
+            proposal.clientDraft?.name.trim(),
+        )
+        .map((proposal) => proposal.clientRef as string),
+    );
     const normalizedProposals = parsed.proposals.map((proposal) => {
       const contextualClientId = selectedClient?.id ?? null;
       const proposedClientId =
-        proposal.clientId && knownClientIds.has(proposal.clientId)
-          ? proposal.clientId
-          : contextualClientId;
-      const missingClient = !proposedClientId;
+        proposal.kind === "client_create"
+          ? null
+          : proposal.clientId && knownClientIds.has(proposal.clientId)
+            ? proposal.clientId
+            : contextualClientId;
+      const proposedClientRef =
+        proposal.clientRef && proposedClientRefs.has(proposal.clientRef)
+          ? proposal.clientRef
+          : null;
+      const incompleteDraft =
+        proposal.kind === "client_create" &&
+        (!proposal.clientDraft?.name.trim() || !proposedClientRef);
+      const missingClient =
+        proposal.kind !== "client_create" &&
+        !proposedClientId &&
+        !proposedClientRef;
       const incompletePatch =
         proposal.kind === "client_update" && !proposal.clientPatch;
       return {
         ...proposal,
         clientId: proposedClientId,
+        clientRef: proposedClientRef,
         requiresClarification:
-          proposal.requiresClarification || missingClient || incompletePatch,
+          proposal.requiresClarification ||
+          missingClient ||
+          incompletePatch ||
+          incompleteDraft,
       };
     });
     const db = getDb();

@@ -1349,7 +1349,11 @@ h1 {
   background: var(--surface);
 }
 .proposal-accepted { border-color: rgba(52,199,89,.38); background: #f1fbf4; }
-.proposal-rejected { opacity: .42; }
+.proposal-rejected {
+  border-color: rgba(255,59,48,.22);
+  background: color-mix(in srgb, var(--surface) 92%, var(--red));
+}
+.proposal-rejected > div:first-child { opacity: .48; }
 .proposal-type { color: var(--blue); font-size: 10px; font-weight: 700; }
 .proposal-card h3 { margin: 4px 0 3px; font-size: 15px; font-weight: 680; }
 .proposal-card p { color: var(--secondary); font-size: 11px; }
@@ -1359,6 +1363,21 @@ h1 {
   color: var(--secondary);
   font-size: 11px;
   line-height: 1.4;
+}
+.proposal-link {
+  display: block;
+  margin-top: 8px;
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.proposal-link strong { color: var(--text); }
+.proposal-dependency-error {
+  margin-top: 8px;
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
 }
 .proposal-client-field {
   display: grid;
@@ -1406,6 +1425,7 @@ h1 {
 }
 .proposal-actions .accept { background: rgba(52,199,89,.12); color: #1d9b3e; }
 .proposal-actions .reject { background: rgba(255,59,48,.1); color: var(--red); }
+.proposal-actions .restore { background: rgba(0,122,255,.12); color: var(--blue); }
 
 @media (min-width: 560px) {
   body { background: #e7e7ec; }

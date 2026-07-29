@@ -29,6 +29,7 @@ import {
   StickyNote,
   Sun,
   TrendingUp,
+  Undo2,
   Users,
   WalletCards,
   X,
@@ -84,11 +85,21 @@ type AIProposal = {
     | "meeting"
     | "contact"
     | "note"
-    | "client_update";
+    | "client_update"
+    | "client_create";
   title: string;
   details: string | null;
   clientId: string | null;
+  clientRef: string | null;
   dueAt: string | null;
+  clientDraft: {
+    name: string;
+    category: "active" | "potential";
+    status: string | null;
+    attention: Client["attention"] | null;
+    nextAction: string | null;
+    amount: string | null;
+  } | null;
   clientPatch: {
     status: string | null;
     attention: Client["attention"] | null;
@@ -2545,7 +2556,16 @@ function VoiceOverlay({
       contact: "Контакт",
       note: "Заметка",
       client_update: "Карточка клиента",
+      client_create: "Новый клиент",
     };
+    const createdClientsByRef = new Map(
+      proposalCards
+        .filter(
+          (proposal) =>
+            proposal.kind === "client_create" && proposal.clientRef,
+        )
+        .map((proposal) => [proposal.clientRef as string, proposal]),
+    );
     const cards = proposalCards.map((proposal) => ({
       ...proposal,
       type: kindLabels[proposal.kind],
@@ -2558,6 +2578,17 @@ function VoiceOverlay({
             }).format(new Date(proposal.dueAt))
           : proposal.details || `Контекст · ${scope}`,
     }));
+    const hasBrokenDependencies = cards.some((card) => {
+      if (
+        (proposals[card.id] ?? "pending") !== "accepted" ||
+        card.kind === "client_create" ||
+        !card.clientRef
+      ) {
+        return false;
+      }
+      const parent = createdClientsByRef.get(card.clientRef);
+      return !parent || proposals[parent.id] !== "accepted";
+    });
     return (
       <div className="overlay voice-overlay">
         <section className="review-sheet">
@@ -2579,9 +2610,14 @@ function VoiceOverlay({
           <div className="proposal-list">
             {cards.map((card) => {
               const status = proposals[card.id] ?? "pending";
+              const linkedClient = card.clientRef
+                ? createdClientsByRef.get(card.clientRef)
+                : undefined;
               const confirmationBlocked =
-                !card.clientId ||
-                (card.kind === "client_update" && !card.clientPatch);
+                card.kind === "client_create"
+                  ? !card.clientRef || !card.clientDraft?.name.trim()
+                  : (!card.clientId && !card.clientRef) ||
+                    (card.kind === "client_update" && !card.clientPatch);
               return (
                 <article
                   className={`proposal-card proposal-${status}`}
@@ -2609,7 +2645,21 @@ function VoiceOverlay({
                       <h3>{editedTitles[card.id] ?? card.title}</h3>
                     )}
                     <p>{card.detail}</p>
-                    {!card.clientId && (
+                    {card.kind !== "client_create" &&
+                      card.clientRef &&
+                      linkedClient && (
+                        <small className="proposal-link">
+                          Будет привязано к новому клиенту:{" "}
+                          <strong>
+                            {editedTitles[linkedClient.id] ??
+                              linkedClient.clientDraft?.name ??
+                              linkedClient.title}
+                          </strong>
+                        </small>
+                      )}
+                    {card.kind !== "client_create" &&
+                      !card.clientId &&
+                      !card.clientRef && (
                       <label className="proposal-client-field">
                         <span>Выберите клиента</span>
                         <select
@@ -2628,7 +2678,7 @@ function VoiceOverlay({
                           ))}
                         </select>
                       </label>
-                    )}
+                      )}
                     {card.requiresClarification && !confirmationBlocked && (
                       <small className="proposal-advisory">
                         AI рекомендует проверить детали. Можно подтвердить как
@@ -2637,13 +2687,23 @@ function VoiceOverlay({
                     )}
                   </div>
                   <div className="proposal-actions">
-                    <button
-                      className="reject"
-                      onClick={() => onProposal(card.id, "rejected")}
-                      aria-label="Отклонить"
-                    >
-                      <X size={14} />
-                    </button>
+                    {status === "rejected" ? (
+                      <button
+                        className="restore"
+                        onClick={() => onProposal(card.id, "pending")}
+                        aria-label="Вернуть предложение"
+                      >
+                        <Undo2 size={15} />
+                      </button>
+                    ) : (
+                      <button
+                        className="reject"
+                        onClick={() => onProposal(card.id, "rejected")}
+                        aria-label="Отклонить"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                     <button
                       className="edit"
                       aria-label="Изменить предложение"
@@ -2668,12 +2728,19 @@ function VoiceOverlay({
             className="primary-button"
             disabled={
               Object.keys(proposals).length === 0 ||
-              Object.values(proposals).some((value) => value === "pending")
+              Object.values(proposals).some((value) => value === "pending") ||
+              hasBrokenDependencies
             }
             onClick={() => onApply(editedTitles)}
           >
             Применить решения
           </button>
+          {hasBrokenDependencies && (
+            <p className="proposal-dependency-error">
+              Чтобы сохранить связанное действие, подтвердите создание его
+              клиента или отклоните это действие.
+            </p>
+          )}
         </section>
       </div>
     );

@@ -35,6 +35,7 @@ const kindLabels = {
   contact: "Контакт",
   note: "Заметка",
   client_update: "Обновление клиента",
+  client_create: "Новый клиент",
 };
 
 export function serializeClient(client: typeof clients.$inferSelect) {

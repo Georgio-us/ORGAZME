@@ -24,6 +24,7 @@ export const eventKind = pgEnum("event_kind", [
   "contact",
   "note",
   "client_update",
+  "client_create",
 ]);
 
 export const proposalStatus = pgEnum("proposal_status", [
