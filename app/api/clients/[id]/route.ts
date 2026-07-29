@@ -40,6 +40,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ...(typeof body.amount === "string" && body.amount.trim()
           ? { amount: body.amount.trim() }
           : {}),
+        ...(typeof body.archived === "boolean"
+          ? { archived: body.archived }
+          : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(clients.id, id), eq(clients.ownerId, OWNER_ID)))
