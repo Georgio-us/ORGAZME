@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   Bell,
+  Brain,
   BriefcaseBusiness,
   CalendarDays,
   CalendarClock,
@@ -2310,6 +2311,12 @@ function ClientDashboard({
   const workingDynamics = asRecord(client.context.workingDynamics);
   const newBusiness = asRecord(client.context.newBusinessContext);
   const tentativePlans = asRecords(client.context.tentativePlans);
+  const preferences = asRecords(client.context.preferences);
+  const insights = asRecords(client.context.insights);
+  const risks = asRecords(client.context.risks);
+  const legacyGeneralFacts = asRecords(client.context.facts).filter(
+    (item) => asText(item.field) === "general_fact",
+  );
   const priorities = Array.isArray(client.context.priorities)
     ? client.context.priorities.filter(
         (item): item is string => typeof item === "string",
@@ -2645,6 +2652,83 @@ function ClientDashboard({
           {asText(relationship.quality) && (
             <p className="client-context-note">{asText(relationship.quality)}</p>
           )}
+        </section>
+      )}
+
+      {(asText(relationship.origin) ||
+        asText(relationship.referralPotential) ||
+        preferences.length > 0 ||
+        insights.length > 0 ||
+        legacyGeneralFacts.length > 0 ||
+        risks.length > 0 ||
+        asText(workingDynamics.communicationStyle) ||
+        asText(workingDynamics.decisionPattern)) && (
+        <section className="client-detail-section client-memory-section">
+          <div className="client-detail-head">
+            <div>
+              <span className="eyebrow">Память</span>
+              <h2>Наблюдения и особенности</h2>
+            </div>
+            <Brain size={18} />
+          </div>
+          {asText(relationship.origin) && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Источник клиента</strong>
+                <small>{asText(relationship.origin)}</small>
+              </span>
+            </div>
+          )}
+          {asText(relationship.referralPotential) && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Реферальный потенциал</strong>
+                <small>{asText(relationship.referralPotential)}</small>
+              </span>
+            </div>
+          )}
+          {asText(workingDynamics.communicationStyle) && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Стиль коммуникации</strong>
+                <small>{asText(workingDynamics.communicationStyle)}</small>
+              </span>
+            </div>
+          )}
+          {asText(workingDynamics.decisionPattern) && (
+            <div className="client-detail-row">
+              <span>
+                <strong>Принятие решений</strong>
+                <small>{asText(workingDynamics.decisionPattern)}</small>
+              </span>
+            </div>
+          )}
+          {[...preferences, ...insights, ...legacyGeneralFacts].map(
+            (item, index) => (
+              <div
+                className="client-detail-row"
+                key={`${asText(item.title)}-${asText(item.value)}-${index}`}
+              >
+                <span>
+                  <strong>{asText(item.title, "Наблюдение")}</strong>
+                  <small>
+                    {asText(item.value) ||
+                      asText(item.details) ||
+                      "Подтверждённый факт"}
+                  </small>
+                </span>
+              </div>
+            ),
+          )}
+          {risks.map((item, index) => (
+            <p
+              className="client-context-warning"
+              key={`${asText(item.title)}-${index}`}
+            >
+              <strong>{asText(item.title, "Риск")}</strong>
+              {asText(item.value)}
+            </p>
+          ))}
         </section>
       )}
 

@@ -43,10 +43,17 @@ type ProposalPayload = {
       | "base_location"
       | "relationship_started"
       | "relationship_quality"
+      | "relationship_origin"
+      | "referral_potential"
       | "primary_contact"
       | "stakeholder"
       | "project"
       | "service"
+      | "preference"
+      | "communication_style"
+      | "decision_pattern"
+      | "insight"
+      | "risk"
       | "blocker"
       | "priority"
       | "plan"
@@ -167,13 +174,19 @@ function applyContextChange(
       break;
     }
     case "relationship_started":
-    case "relationship_quality": {
+    case "relationship_quality":
+    case "relationship_origin":
+    case "referral_potential": {
       const relationship = { ...record(context.relationship) };
       if (change.field === "relationship_started") {
         relationship.startedAt = change.date ?? change.value;
         relationship.startedAtApproximate = change.approximate;
-      } else {
+      } else if (change.field === "relationship_quality") {
         relationship.quality = change.value;
+      } else if (change.field === "relationship_origin") {
+        relationship.origin = change.value;
+      } else {
+        relationship.referralPotential = change.value;
       }
       context.relationship = relationship;
       break;
@@ -230,6 +243,38 @@ function applyContextChange(
         (entry) => String(entry.title ?? ""),
       );
       break;
+    case "preference":
+      context.preferences = appendUnique(
+        records(context.preferences),
+        { title: change.title, value: change.value },
+        (entry) => `${String(entry.title ?? "")}:${String(entry.value ?? "")}`,
+      );
+      break;
+    case "communication_style":
+    case "decision_pattern": {
+      const workingDynamics = { ...record(context.workingDynamics) };
+      workingDynamics[
+        change.field === "communication_style"
+          ? "communicationStyle"
+          : "decisionPattern"
+      ] = change.value;
+      context.workingDynamics = workingDynamics;
+      break;
+    }
+    case "insight":
+      context.insights = appendUnique(
+        records(context.insights),
+        { title: change.title, value: change.value },
+        (entry) => `${String(entry.title ?? "")}:${String(entry.value ?? "")}`,
+      );
+      break;
+    case "risk":
+      context.risks = appendUnique(
+        records(context.risks),
+        { title: change.title, value: change.value },
+        (entry) => `${String(entry.title ?? "")}:${String(entry.value ?? "")}`,
+      );
+      break;
     case "blocker":
       context.workingDynamics = {
         ...record(context.workingDynamics),
@@ -267,6 +312,11 @@ function applyContextChange(
       );
       break;
     case "general_fact":
+      context.insights = appendUnique(
+        records(context.insights),
+        { title: change.title, value: change.value, type: "fact" },
+        (entry) => `${String(entry.title ?? "")}:${String(entry.value ?? "")}`,
+      );
       break;
   }
   return context;
