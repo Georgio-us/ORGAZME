@@ -98,6 +98,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      !request.headers.get("content-type")?.toLowerCase().includes("multipart/form-data")
+    ) {
+      return NextResponse.json(
+        { error: "Ожидается голосовая запись в формате multipart/form-data." },
+        { status: 400 },
+      );
+    }
+
     await ensureWorkspace();
     const formData = await request.formData();
     const audio = formData.get("audio");
