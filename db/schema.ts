@@ -1,5 +1,6 @@
 import {
   boolean,
+  integer,
   index,
   jsonb,
   pgEnum,
@@ -22,6 +23,7 @@ export const eventKind = pgEnum("event_kind", [
   "meeting",
   "contact",
   "note",
+  "client_update",
 ]);
 
 export const proposalStatus = pgEnum("proposal_status", [
@@ -47,8 +49,14 @@ export const clients = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
     name: text("name").notNull(),
+    category: text("category").notNull().default("potential"),
     status: text("status").notNull().default("active"),
     attention: clientAttention("attention").notNull().default("calm"),
+    nextAction: text("next_action")
+      .notNull()
+      .default("Определить следующее действие"),
+    lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
+    amount: text("amount").notNull().default("Не указано"),
     context: jsonb("context").$type<Record<string, unknown>>().default({}),
     archived: boolean("archived").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -113,5 +121,30 @@ export const aiProposals = pgTable(
   (table) => [
     index("ai_proposals_owner_idx").on(table.ownerId),
     index("ai_proposals_client_idx").on(table.clientId),
+  ],
+);
+
+export const recordings = pgTable(
+  "recordings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerId: uuid("owner_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    clientId: uuid("client_id").references(() => clients.id, {
+      onDelete: "cascade",
+    }),
+    intent: text("intent"),
+    transcript: text("transcript").notNull(),
+    mimeType: text("mime_type"),
+    durationSeconds: integer("duration_seconds"),
+    status: text("status").notNull().default("processed"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("recordings_owner_idx").on(table.ownerId),
+    index("recordings_client_idx").on(table.clientId),
   ],
 );

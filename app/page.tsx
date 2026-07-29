@@ -74,6 +74,33 @@ type TimelineItem = {
   tone: "blue" | "red" | "green" | "gray";
 };
 
+type AIProposal = {
+  id: string;
+  kind:
+    | "event"
+    | "task"
+    | "meeting"
+    | "contact"
+    | "note"
+    | "client_update";
+  title: string;
+  details: string | null;
+  clientId: string | null;
+  dueAt: string | null;
+  clientPatch: {
+    status: string | null;
+    attention: Client["attention"] | null;
+    nextAction: string | null;
+    amount: string | null;
+  } | null;
+  requiresClarification: boolean;
+};
+
+type WorkspaceSnapshot = {
+  clients: Client[];
+  timelines: Record<string, TimelineItem[]>;
+};
+
 const seedClients: Client[] = [
   {
     id: "shaped-house",
@@ -283,6 +310,8 @@ export default function Home() {
   const [proposalStates, setProposalStates] = useState<
     Record<string, ProposalState>
   >({});
+  const [aiTranscript, setAiTranscript] = useState("");
+  const [aiProposalsList, setAiProposalsList] = useState<AIProposal[]>([]);
 
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -322,6 +351,30 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/bootstrap", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("live_data_unavailable");
+        return (await response.json()) as WorkspaceSnapshot;
+      })
+      .then((snapshot) => {
+        if (!mounted) return;
+        setClientRecords(snapshot.clients);
+        setTimelines(snapshot.timelines);
+        if (snapshot.clients[0]) setSelectedClient(snapshot.clients[0]);
+      })
+      .catch(() => {
+        if (mounted) {
+          setToast("Работаем на локальных демо-данных");
+          window.setTimeout(() => setToast(""), 1800);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const changeTheme = (nextTheme: ThemePreference) => {
     setTheme(nextTheme);
     window.localStorage.setItem("orgazme-theme", nextTheme);
@@ -352,21 +405,88 @@ export default function Home() {
     setClientView("dashboard");
   };
 
-  const addClient = (client: Client) => {
-    setClientRecords((current) => [client, ...current]);
-    setNewClientOpen(false);
-    setSelectedClient(client);
-    setScreen("client");
-    showToast("Клиент создан");
+  const applySnapshot = (snapshot: WorkspaceSnapshot, selectedId?: string) => {
+    setClientRecords(snapshot.clients);
+    setTimelines(snapshot.timelines);
+    const currentId = selectedId ?? selectedClient.id;
+    const current = snapshot.clients.find((client) => client.id === currentId);
+    if (current) setSelectedClient(current);
   };
 
-  const updateClient = (updatedClient: Client) => {
-    setClientRecords((current) =>
-      current.map((client) =>
-        client.id === updatedClient.id ? updatedClient : client,
-      ),
-    );
-    setSelectedClient(updatedClient);
+  const addClient = async (client: Client) => {
+    try {
+      const response = await fetch("/api/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(client),
+      });
+      const data = (await response.json()) as { client?: Client; error?: string };
+      if (!response.ok || !data.client) {
+        throw new Error(data.error || "Не удалось создать клиента.");
+      }
+      setClientRecords((current) => [data.client!, ...current]);
+      setTimelines((current) => ({ ...current, [data.client!.id]: [] }));
+      setNewClientOpen(false);
+      setSelectedClient(data.client);
+      setScreen("client");
+      showToast("Клиент сохранён в базе");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Ошибка сохранения");
+    }
+  };
+
+  const updateClient = async (updatedClient: Client) => {
+    try {
+      const response = await fetch(`/api/clients/${updatedClient.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedClient),
+      });
+      const data = (await response.json()) as { client?: Client; error?: string };
+      if (!response.ok || !data.client) {
+        throw new Error(data.error || "Не удалось обновить клиента.");
+      }
+      setClientRecords((current) =>
+        current.map((client) =>
+          client.id === data.client!.id ? data.client! : client,
+        ),
+      );
+      setSelectedClient(data.client);
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Ошибка сохранения");
+      return false;
+    }
+  };
+
+  const updateEvent = async (
+    eventId: string,
+    patch: Record<string, unknown>,
+  ) => {
+    try {
+      const response = await fetch(`/api/events/${eventId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = (await response.json()) as {
+        event?: TimelineItem;
+        error?: string;
+      };
+      if (!response.ok || !data.event) {
+        throw new Error(data.error || "Не удалось обновить событие.");
+      }
+      setTimelines((current) => ({
+        ...current,
+        [selectedClient.id]: (current[selectedClient.id] ?? []).map((item) =>
+          item.id === eventId ? data.event! : item,
+        ),
+      }));
+      return data.event;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Ошибка сохранения");
+      return null;
+    }
   };
 
   const beginRecording = async (
@@ -418,6 +538,49 @@ export default function Home() {
     void beginRecording(type, false);
   };
 
+  const processRecording = async (blob: Blob) => {
+    try {
+      const formData = new FormData();
+      formData.append(
+        "audio",
+        new File([blob], "orgazme-voice.webm", {
+          type: blob.type || "audio/webm",
+        }),
+      );
+      if (voiceIntent) formData.append("intent", voiceIntent);
+      if (screen === "client") formData.append("clientId", selectedClient.id);
+      formData.append("durationSeconds", String(recordingSeconds));
+
+      const response = await fetch("/api/ai/ingest", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as {
+        transcript?: string;
+        proposals?: AIProposal[];
+        error?: string;
+      };
+      if (!response.ok || !data.transcript || !data.proposals) {
+        throw new Error(data.error || "AI не смог обработать запись.");
+      }
+      setAiTranscript(data.transcript);
+      setAiProposalsList(data.proposals);
+      setProposalStates(
+        Object.fromEntries(
+          data.proposals.map((proposal) => [proposal.id, "pending"]),
+        ),
+      );
+      setVoiceState("review");
+    } catch (error) {
+      setVoiceError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось обработать запись.",
+      );
+      setVoiceState("error");
+    }
+  };
+
   const stopRecording = () => {
     if (recordingTimer.current) {
       clearInterval(recordingTimer.current);
@@ -429,10 +592,10 @@ export default function Home() {
         mediaStream.current?.getTracks().forEach((track) => track.stop());
         mediaStream.current = null;
         setVoiceState("processing");
-        window.setTimeout(() => {
-          setProposalStates({});
-          setVoiceState("review");
-        }, 1250);
+        const blob = new Blob(audioChunks.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        void processRecording(blob);
       };
       recorder.stop();
       return;
@@ -480,46 +643,49 @@ export default function Home() {
     mediaStream.current?.getTracks().forEach((track) => track.stop());
     setVoiceState("idle");
     setVoiceIntent(null);
+    setAiTranscript("");
+    setAiProposalsList([]);
   };
 
   const setProposal = (id: string, state: ProposalState) => {
     setProposalStates((current) => ({ ...current, [id]: state }));
   };
 
-  const applyProposals = () => {
-    if (acceptedProposals > 0 && screen === "client") {
-      const contextualTitles: Record<ActionType, string> = {
-        event: "Клиент согласовал обновлённую структуру",
-        task: "Отправить обновлённые данные",
-        meeting: "Провести Zoom на следующей неделе",
-        contact: "Созвон по вопросам хостинга",
-        note: "Сохранить компактную структуру интерфейса",
+  const applyProposals = async (editedTitles: Record<string, string>) => {
+    try {
+      const decisions = aiProposalsList
+        .filter((proposal) => proposalStates[proposal.id] !== "pending")
+        .map((proposal) => ({
+          id: proposal.id,
+          status: proposalStates[proposal.id] as "accepted" | "rejected",
+          title: editedTitles[proposal.id],
+        }));
+      const response = await fetch("/api/ai/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decisions }),
+      });
+      const data = (await response.json()) as WorkspaceSnapshot & {
+        error?: string;
       };
-      setTimelines((current) => ({
-        ...current,
-        [selectedClient.id]: [
-          {
-            id: `ai-${Date.now()}`,
-            kind: voiceIntent ? actionLabels[voiceIntent] : "AI · подтверждено",
-            title: voiceIntent
-              ? contextualTitles[voiceIntent]
-              : `${acceptedProposals} изменения добавлены`,
-            detail: "Карточка и рабочий контекст обновлены",
-            date: "только что",
-            tone: "green",
-          },
-          ...(current[selectedClient.id] ?? []),
-        ],
-      }));
+      if (!response.ok) throw new Error(data.error || "Ошибка применения");
+      applySnapshot(data);
+      showToast(
+        acceptedProposals > 0
+          ? `Сохранено в базе: ${acceptedProposals}`
+          : "Предложения обработаны",
+      );
+      setVoiceState("idle");
+      setVoiceIntent(null);
+      setProposalStates({});
+      setAiTranscript("");
+      setAiProposalsList([]);
+    } catch (error) {
+      setVoiceError(
+        error instanceof Error ? error.message : "Не удалось сохранить решения.",
+      );
+      setVoiceState("error");
     }
-    showToast(
-      acceptedProposals > 0
-        ? `Применено: ${acceptedProposals}`
-        : "Предложения обработаны",
-    );
-    setVoiceState("idle");
-    setVoiceIntent(null);
-    setProposalStates({});
   };
 
   return (
@@ -563,6 +729,15 @@ export default function Home() {
         {screen === "home" && (
           <HomeScreen
             clientCount={clientRecords.length}
+            overdueCount={
+              clientRecords.filter((client) => client.attention === "overdue")
+                .length
+            }
+            attentionCount={
+              clientRecords.filter(
+                (client) => client.attention === "attention",
+              ).length
+            }
             onClients={() => setScreen("clients")}
             onFinances={() => setScreen("finances")}
             onDirections={() => setScreen("directions")}
@@ -584,15 +759,37 @@ export default function Home() {
             view={clientView}
             onViewChange={setClientView}
             timeline={timelines[selectedClient.id] ?? []}
-            taskCompleted={completedTasks.includes(selectedClient.id)}
+            taskCompleted={
+              completedTasks.includes(selectedClient.id) ||
+              (timelines[selectedClient.id] ?? []).some(
+                (item) => item.kind === "Задача" && item.tone === "green",
+              )
+            }
             taskPostponed={postponedTasks.includes(selectedClient.id)}
-            onCompleteTask={() => {
-              setCompletedTasks((items) => [...items, selectedClient.id]);
-              showToast("Задача выполнена");
+            onCompleteTask={async () => {
+              const task = (timelines[selectedClient.id] ?? []).find(
+                (item) => item.kind === "Задача",
+              );
+              if (!task) return showToast("У клиента нет открытой задачи");
+              if (await updateEvent(task.id, { completed: true })) {
+                setCompletedTasks((items) => [...items, selectedClient.id]);
+                showToast("Задача выполнена и сохранена");
+              }
             }}
-            onPostponeTask={() => {
-              setPostponedTasks((items) => [...items, selectedClient.id]);
-              showToast("Задача перенесена на 30 июля");
+            onPostponeTask={async () => {
+              const task = (timelines[selectedClient.id] ?? []).find(
+                (item) => item.kind === "Задача",
+              );
+              if (!task) return showToast("У клиента нет открытой задачи");
+              const nextDue = new Date();
+              nextDue.setDate(nextDue.getDate() + 1);
+              nextDue.setHours(12, 0, 0, 0);
+              if (
+                await updateEvent(task.id, { dueAt: nextDue.toISOString() })
+              ) {
+                setPostponedTasks((items) => [...items, selectedClient.id]);
+                showToast("Задача перенесена и сохранена");
+              }
             }}
             onOpenEvents={() => setClientView("events")}
             onOpenMenu={() => setClientMenuOpen(true)}
@@ -724,6 +921,8 @@ export default function Home() {
           scope={scopeLabel}
           intent={voiceIntent}
           proposals={proposalStates}
+          transcript={aiTranscript}
+          proposalCards={aiProposalsList}
           onProposal={setProposal}
           onCancel={cancelRecording}
           onStop={stopRecording}
@@ -745,8 +944,10 @@ export default function Home() {
       {notificationsOpen && (
         <NotificationsSheet
           onClose={() => setNotificationsOpen(false)}
-          onOpenClient={(clientId) => {
-            const client = clientRecords.find((item) => item.id === clientId);
+          onOpenClient={(clientKey) => {
+            const client = clientRecords.find(
+              (item) => item.id === clientKey || item.name === clientKey,
+            );
             if (client) openClient(client);
             setNotificationsOpen(false);
           }}
@@ -805,9 +1006,11 @@ export default function Home() {
           client={selectedClient}
           onClose={() => setClientEditOpen(false)}
           onSave={(updatedClient) => {
-            updateClient(updatedClient);
-            setClientEditOpen(false);
-            showToast("Карточка клиента обновлена");
+            void updateClient(updatedClient).then((saved) => {
+              if (!saved) return;
+              setClientEditOpen(false);
+              showToast("Карточка клиента обновлена в базе");
+            });
           }}
         />
       )}
@@ -817,9 +1020,11 @@ export default function Home() {
           client={selectedClient}
           onClose={() => setAttentionOpen(false)}
           onSelect={(attention) => {
-            updateClient({ ...selectedClient, attention });
-            setAttentionOpen(false);
-            showToast("Уровень внимания изменён");
+            void updateClient({ ...selectedClient, attention }).then((saved) => {
+              if (!saved) return;
+              setAttentionOpen(false);
+              showToast("Уровень внимания сохранён");
+            });
           }}
         />
       )}
@@ -829,15 +1034,14 @@ export default function Home() {
           event={editingEvent}
           onClose={() => setEditingEvent(null)}
           onSave={(updatedEvent) => {
-            setTimelines((current) => ({
-              ...current,
-              [selectedClient.id]: (current[selectedClient.id] ?? []).map(
-                (item) =>
-                  item.id === updatedEvent.id ? updatedEvent : item,
-              ),
-            }));
-            setEditingEvent(null);
-            showToast("Событие обновлено");
+            void updateEvent(updatedEvent.id, {
+              title: updatedEvent.title,
+              details: updatedEvent.detail,
+            }).then((saved) => {
+              if (!saved) return;
+              setEditingEvent(null);
+              showToast("Событие обновлено в базе");
+            });
           }}
         />
       )}
@@ -867,11 +1071,15 @@ function ActionChoice({
 
 function HomeScreen({
   clientCount,
+  overdueCount,
+  attentionCount,
   onClients,
   onFinances,
   onDirections,
 }: {
   clientCount: number;
+  overdueCount: number;
+  attentionCount: number;
   onClients: () => void;
   onFinances: () => void;
   onDirections: () => void;
@@ -895,8 +1103,8 @@ function HomeScreen({
             <p>{clientCount} клиентов в контексте</p>
           </div>
           <div className="direction-summary">
-            <span><i className="summary-dot danger-dot" />1 просрочено</span>
-            <span><i className="summary-dot warn-dot" />1 ждёт внимания</span>
+            <span><i className="summary-dot danger-dot" />{overdueCount} просрочено</span>
+            <span><i className="summary-dot warn-dot" />{attentionCount} ждёт внимания</span>
           </div>
         </button>
 
@@ -1269,8 +1477,15 @@ function ClientsDashboard({
   onShowAttention: () => void;
   onShowToday: () => void;
 }) {
-  const shapedHouse = clients.find((client) => client.id === "shaped-house");
-  const irina = clients.find((client) => client.id === "irina");
+  const shapedHouse = clients.find((client) => client.name === "Shaped House");
+  const irina = clients.find((client) => client.name === "Ирина");
+  const overdueCount = clients.filter(
+    (client) => client.attention === "overdue",
+  ).length;
+  const attentionCount = clients.filter(
+    (client) =>
+      client.attention === "overdue" || client.attention === "attention",
+  ).length;
   return (
     <>
       <div className="metric-grid">
@@ -1284,13 +1499,13 @@ function ClientsDashboard({
         </button>
         <button className="metric-card" onClick={onShowAttention}>
           <span>Просрочено</span>
-          <strong className="danger-text">1</strong>
-          <small>задача</small>
+          <strong className="danger-text">{overdueCount}</strong>
+          <small>клиентов</small>
         </button>
         <button className="metric-card" onClick={onShowToday}>
           <span>Сегодня</span>
-          <strong>3</strong>
-          <small>действия</small>
+          <strong>{Math.min(3, clients.length)}</strong>
+          <small>в фокусе</small>
         </button>
       </div>
 
@@ -1300,7 +1515,7 @@ function ClientsDashboard({
             <span className="eyebrow">Приоритет</span>
             <h2>Требуют внимания</h2>
           </div>
-          <span className="count-pill">2</span>
+          <span className="count-pill">{attentionCount}</span>
         </div>
         {clients
           .filter(
@@ -1772,7 +1987,7 @@ function TodayActionsSheet({
 }) {
   const actions = [
     {
-      clientId: "shaped-house",
+      clientKey: "Shaped House",
       time: "12:00",
       title: "Отправить обновлённый отчёт",
       detail: "Просрочено · требует решения",
@@ -1780,7 +1995,7 @@ function TodayActionsSheet({
       icon: CircleAlert,
     },
     {
-      clientId: "irina",
+      clientKey: "Ирина",
       time: "19:00",
       title: "Zoom с Ириной",
       detail: "Обсудить следующую итерацию",
@@ -1788,7 +2003,7 @@ function TodayActionsSheet({
       icon: CalendarClock,
     },
     {
-      clientId: "domstar",
+      clientKey: "DomStar",
       time: "До конца дня",
       title: "Проверить ответ DomStar",
       detail: "Согласование структуры лендинга",
@@ -1811,11 +2026,13 @@ function TodayActionsSheet({
           </button>
         </div>
         <div className="notification-list">
-          {actions.map(({ clientId, time, title, detail, tone, icon: Icon }) => {
-            const client = clients.find((item) => item.id === clientId);
+          {actions.map(({ clientKey, time, title, detail, tone, icon: Icon }) => {
+            const client = clients.find(
+              (item) => item.id === clientKey || item.name === clientKey,
+            );
             return (
               <button
-                key={clientId}
+                key={clientKey}
                 onClick={() => client && onOpenClient(client)}
               >
                 <span className={`agenda-icon ${tone}`}><Icon size={16} /></span>
@@ -2013,17 +2230,17 @@ function NotificationsSheet({
           </button>
         </div>
         <div className="notification-list">
-          <button onClick={() => onOpenClient("shaped-house")}>
+          <button onClick={() => onOpenClient("Shaped House")}>
             <span className="agenda-icon agenda-danger"><CircleAlert size={16} /></span>
             <span><strong>Задача просрочена</strong><small>Shaped House · 2 дня</small></span>
             <ChevronRight size={15} />
           </button>
-          <button onClick={() => onOpenClient("irina")}>
+          <button onClick={() => onOpenClient("Ирина")}>
             <span className="agenda-icon agenda-blue"><CalendarClock size={16} /></span>
             <span><strong>Встреча сегодня</strong><small>Ирина · 19:00</small></span>
             <ChevronRight size={15} />
           </button>
-          <button onClick={() => onOpenClient("domstar")}>
+          <button onClick={() => onOpenClient("DomStar")}>
             <span className="agenda-icon agenda-purple"><Sparkles size={16} /></span>
             <span><strong>AI ждёт подтверждения</strong><small>DomStar · новое предложение</small></span>
             <ChevronRight size={15} />
@@ -2350,6 +2567,8 @@ function VoiceOverlay({
   scope,
   intent,
   proposals,
+  transcript,
+  proposalCards,
   onProposal,
   onCancel,
   onStop,
@@ -2362,62 +2581,38 @@ function VoiceOverlay({
   scope: string;
   intent: ActionType | null;
   proposals: Record<string, ProposalState>;
+  transcript: string;
+  proposalCards: AIProposal[];
   onProposal: (id: string, state: ProposalState) => void;
   onCancel: () => void;
   onStop: () => void;
   onRetry: () => void;
-  onApply: () => void;
+  onApply: (editedTitles: Record<string, string>) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editedTitles, setEditedTitles] = useState<Record<string, string>>({});
 
   if (state === "review") {
-    const contextualCards: Record<
-      ActionType,
-      { id: string; type: string; title: string; detail: string }
-    > = {
-      event: {
-        id: "event",
-        type: "Событие",
-        title: "Клиент согласовал обновлённую структуру",
-        detail: `Сегодня · ${scope}`,
-      },
-      task: {
-        id: "task",
-        type: "Задача",
-        title: "Отправить обновлённые данные",
-        detail: "Завтра · 12:00",
-      },
-      meeting: {
-        id: "meeting",
-        type: "Встреча",
-        title: "Провести Zoom на следующей неделе",
-        detail: "Нужно уточнить точную дату",
-      },
-      contact: {
-        id: "contact",
-        type: "Контакт",
-        title: "Созвон по вопросам хостинга",
-        detail: `Сегодня · ${scope}`,
-      },
-      note: {
-        id: "note",
-        type: "Заметка",
-        title: "Сохранить компактную структуру интерфейса",
-        detail: `Без срока · ${scope}`,
-      },
+    const kindLabels: Record<AIProposal["kind"], string> = {
+      event: "Событие",
+      task: "Задача",
+      meeting: "Встреча",
+      contact: "Контакт",
+      note: "Заметка",
+      client_update: "Карточка клиента",
     };
-    const generalCards = [
-      contextualCards.contact,
-      contextualCards.task,
-      contextualCards.meeting,
-    ];
-    const cards = intent ? [contextualCards[intent]] : generalCards;
-    const transcript = intent
-      ? intent === "task"
-        ? "Завтра в двенадцать отправить клиенту обновлённые данные."
-        : `Зафиксировать ${actionLabels[intent].toLowerCase()} в контексте ${scope}.`
-      : "Вчера созванивались по хостингу. Завтра в двенадцать нужно отправить данные и на следующей неделе провести Zoom.";
+    const cards = proposalCards.map((proposal) => ({
+      ...proposal,
+      type: kindLabels[proposal.kind],
+      detail: proposal.requiresClarification
+        ? "Нужно уточнить клиента или недостающие данные"
+        : proposal.dueAt
+          ? new Intl.DateTimeFormat("ru-RU", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(new Date(proposal.dueAt))
+          : proposal.details || `Контекст · ${scope}`,
+    }));
     return (
       <div className="overlay voice-overlay">
         <section className="review-sheet">
@@ -2466,6 +2661,9 @@ function VoiceOverlay({
                       <h3>{editedTitles[card.id] ?? card.title}</h3>
                     )}
                     <p>{card.detail}</p>
+                    {card.requiresClarification && (
+                      <small>Это предложение нельзя применить без уточнения.</small>
+                    )}
                   </div>
                   <div className="proposal-actions">
                     <button
@@ -2484,6 +2682,7 @@ function VoiceOverlay({
                     </button>
                     <button
                       className="accept"
+                      disabled={card.requiresClarification}
                       onClick={() => onProposal(card.id, "accepted")}
                       aria-label="Подтвердить"
                     >
@@ -2500,7 +2699,7 @@ function VoiceOverlay({
               Object.keys(proposals).length === 0 ||
               Object.values(proposals).some((value) => value === "pending")
             }
-            onClick={onApply}
+            onClick={() => onApply(editedTitles)}
           >
             Применить решения
           </button>
