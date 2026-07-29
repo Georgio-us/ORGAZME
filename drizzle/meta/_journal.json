@@ -15,6 +15,13 @@
       "when": 1785329933686,
       "tag": "0001_swift_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785331342373,
+      "tag": "0002_clean_workspace",
+      "breakpoints": true
     }
   ]
 }
