@@ -719,10 +719,9 @@ h1 {
 
 .current-task-card {
   padding: 14px;
-  border: .5px solid rgba(255,59,48,.25);
-  border-radius: 16px;
+  border: 3px solid var(--red);
+  border-radius: 20px;
   background: var(--surface);
-  box-shadow: inset 3px 0 var(--red);
 }
 .task-label > span:first-child {
   color: var(--secondary);
@@ -739,8 +738,10 @@ h1 {
 }
 .current-task-card p { margin-top: 5px; color: var(--secondary); font-size: 10px; }
 .current-task-card.task-completed {
-  border-color: rgba(52,199,89,.3);
-  box-shadow: inset 3px 0 var(--green);
+  border-color: var(--green);
+}
+.current-task-card.task-postponed {
+  border-color: var(--orange);
 }
 .complete-pill {
   padding: 4px 8px;

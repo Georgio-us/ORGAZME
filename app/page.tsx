@@ -1356,7 +1356,13 @@ function ClientDashboard({
   return (
     <div className="client-dashboard">
       <section
-        className={`current-task-card ${taskCompleted ? "task-completed" : ""}`}
+        className={`current-task-card ${
+          taskCompleted
+            ? "task-completed"
+            : taskPostponed
+              ? "task-postponed"
+              : "task-overdue"
+        }`}
       >
         <div className="task-label">
           <span>Текущая задача</span>
