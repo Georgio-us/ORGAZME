@@ -193,17 +193,23 @@ h1 {
 }
 .clients-card p { color: rgba(255,255,255,.68); }
 .finance-card {
-  border-color: rgba(40,128,76,.12);
-  background: linear-gradient(145deg, #e6f6eb, #d4efdd);
-  color: #174b2d;
+  border: 0;
+  background:
+    radial-gradient(circle at 94% 8%, rgba(255,255,255,.16), transparent 34%),
+    linear-gradient(145deg, #26945f, #116c49);
+  box-shadow: 0 9px 23px rgba(25,125,83,.2);
+  color: white;
 }
-.finance-card p { color: rgba(23,75,45,.62); }
+.finance-card p { color: rgba(255,255,255,.7); }
 .directions-card {
-  border-color: rgba(194,91,69,.12);
-  background: linear-gradient(145deg, #ffebe6, #f9d8cf);
-  color: #6b3026;
+  border: 0;
+  background:
+    radial-gradient(circle at 94% 8%, rgba(255,255,255,.17), transparent 34%),
+    linear-gradient(145deg, #f47a61, #d84e3b);
+  box-shadow: 0 9px 23px rgba(216,78,59,.2);
+  color: white;
 }
-.directions-card p { color: rgba(107,48,38,.62); }
+.directions-card p { color: rgba(255,255,255,.72); }
 .direction-icon {
   display: grid;
   width: 36px;
@@ -218,15 +224,15 @@ h1 {
   color: var(--blue);
 }
 .direction-card:not(.clients-card) .finance-icon {
-  background: rgba(255,255,255,.66);
-  color: #27844a;
+  background: rgba(255,255,255,.2);
+  color: white;
 }
 .direction-card:not(.clients-card) .projects-icon {
-  background: rgba(255,255,255,.62);
-  color: #c55f49;
+  background: rgba(255,255,255,.2);
+  color: white;
 }
-.finance-card .card-chevron { color: rgba(23,75,45,.45); }
-.directions-card .card-chevron { color: rgba(107,48,38,.45); }
+.finance-card .card-chevron,
+.directions-card .card-chevron { color: rgba(255,255,255,.72); }
 .direction-arrow { color: rgba(255,255,255,.7); }
 .soon-chip {
   padding: 4px 7px;
@@ -1261,19 +1267,17 @@ h1 {
   background: linear-gradient(145deg, #0876e6, #0753a9);
 }
 .app-shell[data-theme="dark"] .finance-card {
-  border-color: rgba(91,182,122,.2);
-  background: linear-gradient(145deg, #183d2a, #112f21);
-  color: #c9f1d6;
+  background: linear-gradient(145deg, #218454, #0f5c3d);
+  color: white;
 }
-.app-shell[data-theme="dark"] .finance-card p { color: rgba(201,241,214,.62); }
-.app-shell[data-theme="dark"] .finance-card .card-chevron { color: rgba(201,241,214,.45); }
+.app-shell[data-theme="dark"] .finance-card p { color: rgba(255,255,255,.68); }
+.app-shell[data-theme="dark"] .finance-card .card-chevron { color: rgba(255,255,255,.7); }
 .app-shell[data-theme="dark"] .directions-card {
-  border-color: rgba(242,139,118,.2);
-  background: linear-gradient(145deg, #4b2823, #38201c);
-  color: #ffd7cf;
+  background: linear-gradient(145deg, #d96651, #ae3d2e);
+  color: white;
 }
-.app-shell[data-theme="dark"] .directions-card p { color: rgba(255,215,207,.62); }
-.app-shell[data-theme="dark"] .directions-card .card-chevron { color: rgba(255,215,207,.45); }
+.app-shell[data-theme="dark"] .directions-card p { color: rgba(255,255,255,.68); }
+.app-shell[data-theme="dark"] .directions-card .card-chevron { color: rgba(255,255,255,.7); }
 .app-shell[data-theme="dark"] .metric-primary {
   background: linear-gradient(145deg, #37373b, #252527);
 }
@@ -1300,19 +1304,17 @@ h1 {
     background: linear-gradient(145deg, #0876e6, #0753a9);
   }
   .app-shell[data-theme="system"] .finance-card {
-    border-color: rgba(91,182,122,.2);
-    background: linear-gradient(145deg, #183d2a, #112f21);
-    color: #c9f1d6;
+    background: linear-gradient(145deg, #218454, #0f5c3d);
+    color: white;
   }
-  .app-shell[data-theme="system"] .finance-card p { color: rgba(201,241,214,.62); }
-  .app-shell[data-theme="system"] .finance-card .card-chevron { color: rgba(201,241,214,.45); }
+  .app-shell[data-theme="system"] .finance-card p { color: rgba(255,255,255,.68); }
+  .app-shell[data-theme="system"] .finance-card .card-chevron { color: rgba(255,255,255,.7); }
   .app-shell[data-theme="system"] .directions-card {
-    border-color: rgba(242,139,118,.2);
-    background: linear-gradient(145deg, #4b2823, #38201c);
-    color: #ffd7cf;
+    background: linear-gradient(145deg, #d96651, #ae3d2e);
+    color: white;
   }
-  .app-shell[data-theme="system"] .directions-card p { color: rgba(255,215,207,.62); }
-  .app-shell[data-theme="system"] .directions-card .card-chevron { color: rgba(255,215,207,.45); }
+  .app-shell[data-theme="system"] .directions-card p { color: rgba(255,255,255,.68); }
+  .app-shell[data-theme="system"] .directions-card .card-chevron { color: rgba(255,255,255,.7); }
   .app-shell[data-theme="system"] .metric-primary {
     background: linear-gradient(145deg, #37373b, #252527);
   }

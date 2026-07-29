@@ -1687,8 +1687,8 @@ function InterfaceSettingsSheet({
   }> = [
     {
       value: "system",
-      label: "Системная",
-      detail: "Следует настройкам устройства",
+      label: "Авто",
+      detail: "Светлая или тёмная — как на устройстве",
       icon: Monitor,
     },
     {
