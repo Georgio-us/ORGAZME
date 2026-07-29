@@ -404,15 +404,15 @@ export async function POST(request: NextRequest) {
       ) ||
       (transcript.match(/(?:\sи\s|также|потом|дальше|кроме того)/giu) ?? [])
         .length >= 2;
-    const needsExtendedReasoning =
+    const needsFlagshipReasoning =
       wordCount >= 120 || clauseCount >= 10 || amountCount >= 6;
-    const interpreterModel = isDeepAnalysis
+    const interpreterModel = needsFlagshipReasoning
       ? process.env.OPENAI_COMPLEX_MODEL ?? "gpt-5.6-sol"
       : process.env.OPENAI_FAST_MODEL ??
         process.env.OPENAI_MODEL ??
         "gpt-5.6-terra";
     const reasoningEffort =
-      isDeepAnalysis && needsExtendedReasoning ? "medium" : "low";
+      needsFlagshipReasoning ? "medium" : "low";
 
     const response = await openai.responses.create({
       model: interpreterModel,
