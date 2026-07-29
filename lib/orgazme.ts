@@ -76,6 +76,16 @@ export function serializeEvent(event: typeof events.$inferSelect) {
         hour: "2-digit",
         minute: "2-digit",
       }).format(moment);
+  const dueKey = event.dueDate
+    ? event.dueDate
+    : event.dueAt
+      ? new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Europe/Madrid",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(event.dueAt)
+      : null;
   return {
     id: event.id,
     kind: kindLabels[event.kind],
@@ -88,10 +98,13 @@ export function serializeEvent(event: typeof events.$inferSelect) {
     completed: Boolean(event.completedAt),
     tone: event.completedAt
       ? "green"
-      : (event.dueAt && event.dueAt.getTime() < Date.now()) ||
-          (event.dueDate && event.dueDate < today)
+      : dueKey && dueKey < today
         ? "red"
-        : event.kind === "contact"
+        : dueKey === today
+          ? "orange"
+          : dueKey && dueKey > today
+            ? "blue"
+            : event.kind === "contact"
           ? "blue"
           : "gray",
   };

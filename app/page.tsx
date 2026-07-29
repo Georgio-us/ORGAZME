@@ -23,6 +23,7 @@ import {
   Monitor,
   Moon,
   MessageCircle,
+  Mic,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -44,7 +45,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 type Screen = "home" | "clients" | "client" | "finances" | "directions";
@@ -54,6 +54,7 @@ type FinanceView = "dashboard" | "list";
 type DirectionsView = "dashboard" | "list";
 type ClientListPreset = "all" | "active" | "attention";
 type ActionType = "event" | "task" | "meeting" | "contact" | "note";
+type WorkState = "overdue" | "today" | "upcoming" | "flow" | "completed";
 type ProposalState = "pending" | "accepted" | "rejected";
 type ThemePreference = "system" | "light" | "dark";
 
@@ -77,7 +78,7 @@ type TimelineItem = {
   title: string;
   detail: string;
   date: string;
-  tone: "blue" | "red" | "green" | "gray";
+  tone: "blue" | "red" | "orange" | "green" | "gray";
   dueAt?: string | null;
   dueDate?: string | null;
   occurredAt?: string;
@@ -204,6 +205,42 @@ function toLocalDateTimeInput(value?: string | null) {
   if (Number.isNaN(date.getTime())) return "";
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function workState(item: TimelineItem): WorkState {
+  if (item.completed) return "completed";
+  const due = item.dueAt ?? item.dueDate;
+  if (!due) return "flow";
+  const dueKey = dateKey(due);
+  const today = dateKey(new Date());
+  if (dueKey < today) return "overdue";
+  if (dueKey === today) return "today";
+  return "upcoming";
+}
+
+function workStateRank(state: WorkState) {
+  return {
+    overdue: 0,
+    today: 1,
+    upcoming: 2,
+    flow: 3,
+    completed: 4,
+  }[state];
+}
+
+function sortWorkItems(items: TimelineItem[]) {
+  return [...items].sort((left, right) => {
+    const stateDifference =
+      workStateRank(workState(left)) - workStateRank(workState(right));
+    if (stateDifference) return stateDifference;
+    const leftTime = new Date(
+      left.dueAt ?? (left.dueDate ? `${left.dueDate}T12:00:00` : left.occurredAt ?? 0),
+    ).getTime();
+    const rightTime = new Date(
+      right.dueAt ?? (right.dueDate ? `${right.dueDate}T12:00:00` : right.occurredAt ?? 0),
+    ).getTime();
+    return leftTime - rightTime;
+  });
 }
 
 const indicatorLabels = {
@@ -398,8 +435,6 @@ export default function Home() {
   const [manualEventOpen, setManualEventOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [toast, setToast] = useState("");
-  const [completedTasks, setCompletedTasks] = useState<string[]>([]);
-  const [postponedTasks, setPostponedTasks] = useState<string[]>([]);
   const [voiceIntent, setVoiceIntent] = useState<ActionType | null>(null);
   const [voiceState, setVoiceState] = useState<
     "idle" | "recording" | "processing" | "review" | "error"
@@ -414,10 +449,7 @@ export default function Home() {
   const [aiCoverage, setAiCoverage] = useState<AICoverage | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
 
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const longPressTriggered = useRef(false);
-  const pointerHeld = useRef(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const mediaStream = useRef<MediaStream | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -455,8 +487,8 @@ export default function Home() {
       .filter(
         (item) =>
           !item.completed &&
-          item.kind !== "Заметка" &&
-          Boolean(item.dueAt || item.dueDate || item.occurredAt),
+          (item.kind === "Задача" || item.kind === "Встреча") &&
+          Boolean(item.dueAt || item.dueDate),
       )
       .sort((left, right) => {
         const leftTime = new Date(
@@ -489,10 +521,35 @@ export default function Home() {
         (item) =>
           item.kind === "Задача" &&
           (item.dueAt || item.dueDate) &&
-          item.tone === "red",
+          workState(item) === "overdue",
       ).length,
     [agendaItems],
   );
+
+  const taskMetrics = useMemo(() => {
+    const tasks = Object.values(timelines)
+      .flat()
+      .filter((item) => item.kind === "Задача");
+    return {
+      flow: tasks.filter((item) => !item.completed).length,
+      completed: tasks.filter((item) => item.completed).length,
+    };
+  }, [timelines]);
+
+  const attentionClientCount = useMemo(() => {
+    const ids = new Set(
+      Object.entries(timelines)
+        .filter(([, items]) =>
+          items.some(
+            (item) =>
+              item.kind === "Задача" &&
+              workState(item) === "today",
+          ),
+        )
+        .map(([clientId]) => clientId),
+    );
+    return ids.size;
+  }, [timelines]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("orgazme-theme");
@@ -746,11 +803,7 @@ export default function Home() {
     showToast("JSON экспортирован");
   };
 
-  const beginRecording = async (
-    intent: ActionType | null,
-    requirePointerHold: boolean,
-  ) => {
-    if (requirePointerHold) longPressTriggered.current = true;
+  const beginRecording = async (intent: ActionType | null) => {
     setVoiceIntent(intent);
     setActionOpen(false);
     setVoiceError("");
@@ -760,12 +813,6 @@ export default function Home() {
         throw new Error("Запись голоса не поддерживается этим браузером.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (requirePointerHold && !pointerHeld.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        setVoiceState("idle");
-        setVoiceIntent(null);
-        return;
-      }
       mediaStream.current = stream;
       const recorder = new MediaRecorder(stream);
       audioChunks.current = [];
@@ -789,10 +836,10 @@ export default function Home() {
     }
   };
 
-  const startGeneralRecording = () => beginRecording(null, true);
+  const startGeneralRecording = () => beginRecording(null);
 
   const startContextualRecording = (type: ActionType) => {
-    void beginRecording(type, false);
+    void beginRecording(type);
   };
 
   const processRecording = async (blob: Blob) => {
@@ -864,38 +911,6 @@ export default function Home() {
       return;
     }
     mediaStream.current?.getTracks().forEach((track) => track.stop());
-  };
-
-  const handleActionPointerDown = (
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    pointerHeld.current = true;
-    longPressTriggered.current = false;
-    holdTimer.current = setTimeout(startGeneralRecording, 420);
-  };
-
-  const handleActionPointerUp = (
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    pointerHeld.current = false;
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current);
-      holdTimer.current = null;
-    }
-    if (longPressTriggered.current) {
-      return;
-    }
-    setActionOpen(true);
-  };
-
-  const handleActionPointerCancel = () => {
-    pointerHeld.current = false;
-    if (holdTimer.current) clearTimeout(holdTimer.current);
-    holdTimer.current = null;
   };
 
   const cancelRecording = () => {
@@ -1053,13 +1068,7 @@ export default function Home() {
             clients={clientRecords}
             clientCount={clientRecords.length}
             overdueCount={overdueTaskCount}
-            attentionCount={
-              clientRecords.filter(
-                (client) =>
-                  client.attention === "attention" ||
-                  client.attention === "overdue",
-              ).length
-            }
+            attentionCount={attentionClientCount}
             agenda={agendaItems.slice(0, 3)}
             onOpenAgenda={(item) => {
               const client = clientRecords.find(
@@ -1077,8 +1086,11 @@ export default function Home() {
           <ClientsScreen
             view={clientsView}
             clients={clientRecords}
+            timelines={timelines}
             todayAgenda={todayAgenda}
             overdueTaskCount={overdueTaskCount}
+            flowTaskCount={taskMetrics.flow}
+            completedTaskCount={taskMetrics.completed}
             onViewChange={setClientsView}
             onOpenClient={openClient}
           />
@@ -1090,37 +1102,25 @@ export default function Home() {
             view={clientView}
             onViewChange={setClientView}
             timeline={timelines[selectedClient.id] ?? []}
-            taskCompleted={
-              completedTasks.includes(selectedClient.id) &&
-              !(timelines[selectedClient.id] ?? []).some(
-                (item) => item.kind === "Задача" && !item.completed,
-              )
-            }
-            taskPostponed={postponedTasks.includes(selectedClient.id)}
             onCompleteTask={async () => {
-              const task = (timelines[selectedClient.id] ?? []).find(
-                (item) => item.kind === "Задача" && !item.completed,
-              );
+              const task = sortWorkItems(
+                (timelines[selectedClient.id] ?? []).filter(
+                  (item) => item.kind === "Задача" && !item.completed,
+                ),
+              )[0];
               if (!task) return showToast("У клиента нет открытой задачи");
               if (await updateEvent(task.id, { completed: true })) {
-                setCompletedTasks((items) => [...items, selectedClient.id]);
                 showToast("Задача выполнена и сохранена");
               }
             }}
-            onPostponeTask={async () => {
-              const task = (timelines[selectedClient.id] ?? []).find(
-                (item) => item.kind === "Задача" && !item.completed,
-              );
+            onPostponeTask={() => {
+              const task = sortWorkItems(
+                (timelines[selectedClient.id] ?? []).filter(
+                  (item) => item.kind === "Задача" && !item.completed,
+                ),
+              )[0];
               if (!task) return showToast("У клиента нет открытой задачи");
-              const nextDue = new Date();
-              nextDue.setDate(nextDue.getDate() + 1);
-              nextDue.setHours(12, 0, 0, 0);
-              if (
-                await updateEvent(task.id, { dueAt: nextDue.toISOString() })
-              ) {
-                setPostponedTasks((items) => [...items, selectedClient.id]);
-                showToast("Задача перенесена и сохранена");
-              }
+              setEditingEvent(task);
             }}
             onOpenEvents={() => setClientView("events")}
             onOpenMenu={() => setClientMenuOpen(true)}
@@ -1165,11 +1165,8 @@ export default function Home() {
         <div className="action-slot">
           <button
             className={`action-button ${voiceState === "recording" ? "is-recording" : ""}`}
-            onPointerDown={handleActionPointerDown}
-            onPointerUp={handleActionPointerUp}
-            onPointerCancel={handleActionPointerCancel}
-            onContextMenu={(event) => event.preventDefault()}
-            aria-label="Действие: нажать для выбора, удерживать для записи"
+            onClick={() => setActionOpen(true)}
+            aria-label="Открыть действия"
           >
             {voiceState === "recording" ? (
               <CircleStop size={24} fill="currentColor" />
@@ -1253,8 +1250,16 @@ export default function Home() {
                 </button>
               )}
             </div>
-            <span className="action-section-label">Голосовая команда</span>
+            <span className="action-section-label">Голосовой ввод</span>
             <div className="action-grid">
+              <button
+                className="action-choice"
+                onClick={() => void startGeneralRecording()}
+              >
+                <span><Mic size={17} strokeWidth={2} /></span>
+                Голосовая команда
+                <ChevronRight size={16} className="choice-chevron" />
+              </button>
               {(Object.keys(actionLabels) as ActionType[]).map((type) => (
                 <ActionChoice
                   key={type}
@@ -2012,15 +2017,21 @@ function DirectionsScreen({
 function ClientsScreen({
   view,
   clients,
+  timelines,
   todayAgenda,
   overdueTaskCount,
+  flowTaskCount,
+  completedTaskCount,
   onViewChange,
   onOpenClient,
 }: {
   view: ClientsView;
   clients: Client[];
+  timelines: Record<string, TimelineItem[]>;
   todayAgenda: AgendaItem[];
   overdueTaskCount: number;
+  flowTaskCount: number;
+  completedTaskCount: number;
   onViewChange: (view: ClientsView) => void;
   onOpenClient: (client: Client) => void;
 }) {
@@ -2053,8 +2064,11 @@ function ClientsScreen({
         {view === "dashboard" ? (
           <ClientsDashboard
             clients={clients}
+            timelines={timelines}
             todayAgenda={todayAgenda}
             overdueTaskCount={overdueTaskCount}
+            flowTaskCount={flowTaskCount}
+            completedTaskCount={completedTaskCount}
             onOpenClient={onOpenClient}
             onShowActive={() => openList("active")}
             onShowAttention={() => openList("attention")}
@@ -2063,6 +2077,7 @@ function ClientsScreen({
         ) : (
           <ClientsList
             clients={clients}
+            timelines={timelines}
             preset={listPreset}
             onOpenClient={onOpenClient}
           />
@@ -2085,28 +2100,51 @@ function ClientsScreen({
 
 function ClientsDashboard({
   clients,
+  timelines,
   todayAgenda,
   overdueTaskCount,
+  flowTaskCount,
+  completedTaskCount,
   onOpenClient,
   onShowActive,
   onShowAttention,
   onShowToday,
 }: {
   clients: Client[];
+  timelines: Record<string, TimelineItem[]>;
   todayAgenda: AgendaItem[];
   overdueTaskCount: number;
+  flowTaskCount: number;
+  completedTaskCount: number;
   onOpenClient: (client: Client) => void;
   onShowActive: () => void;
   onShowAttention: () => void;
   onShowToday: () => void;
 }) {
-  const attentionCount = clients.filter(
-    (client) =>
-      client.attention === "overdue" || client.attention === "attention",
-  ).length;
+  const attentionEntries = clients
+    .map((client) => {
+      const task = sortWorkItems(
+        (timelines[client.id] ?? []).filter(
+          (item) =>
+            item.kind === "Задача" &&
+            (workState(item) === "overdue" || workState(item) === "today"),
+        ),
+      )[0];
+      return task ? { client, task, state: workState(task) } : null;
+    })
+    .filter(
+      (
+        entry,
+      ): entry is {
+        client: Client;
+        task: TimelineItem;
+        state: "overdue" | "today";
+      } => Boolean(entry),
+    );
+  const attentionCount = attentionEntries.length;
   return (
     <>
-      <div className="metric-grid">
+      <div className="metric-grid client-metric-grid">
         <button
           className="metric-card metric-primary"
           onClick={onShowActive}
@@ -2125,6 +2163,16 @@ function ClientsDashboard({
           <strong>{todayAgenda.length}</strong>
           <small>действий</small>
         </button>
+        <article className="metric-card metric-flow">
+          <span>В потоке</span>
+          <strong>{flowTaskCount}</strong>
+          <small>открытых задач</small>
+        </article>
+        <article className="metric-card metric-completed">
+          <span>Выполнено</span>
+          <strong>{completedTaskCount}</strong>
+          <small>задач</small>
+        </article>
       </div>
 
       <section className="attention-panel">
@@ -2146,25 +2194,26 @@ function ClientsDashboard({
             </div>
           </div>
         ) : (
-          clients
-            .filter(
-              (client) =>
-                client.attention === "overdue" ||
-                client.attention === "attention",
-            )
+          attentionEntries
             .slice(0, 3)
-            .map((client) => (
+            .map(({ client, task, state }) => (
               <button
                 key={client.id}
                 className="attention-row"
                 onClick={() => onOpenClient(client)}
               >
-                <span className={`attention-indicator ${client.attention}`} />
+                <span
+                  className={`attention-indicator ${
+                    state === "overdue" ? "overdue" : "attention"
+                  }`}
+                />
                 <span className="attention-copy">
                   <strong>{client.name}</strong>
-                  <small>{client.nextAction}</small>
+                  <small>{task.title}</small>
                 </span>
-                <span className="attention-time">{client.lastContact}</span>
+                <span className="attention-time">
+                  {state === "overdue" ? "просрочено" : task.date}
+                </span>
               </button>
             ))
         )}
@@ -2223,10 +2272,12 @@ function ClientsDashboard({
 
 function ClientsList({
   clients,
+  timelines,
   preset,
   onOpenClient,
 }: {
   clients: Client[];
+  timelines: Record<string, TimelineItem[]>;
   preset: ClientListPreset;
   onOpenClient: (client: Client) => void;
 }) {
@@ -2234,20 +2285,29 @@ function ClientsList({
   const [attentionOnly, setAttentionOnly] = useState(preset === "attention");
   const [activeOnly, setActiveOnly] = useState(preset === "active");
   const [sortBy, setSortBy] = useState<"attention" | "name">("attention");
+  const operationalAttention = (client: Client) => {
+    const states = (timelines[client.id] ?? [])
+      .filter((item) => item.kind === "Задача" && !item.completed)
+      .map(workState);
+    if (states.includes("overdue")) return "overdue" as const;
+    if (states.includes("today")) return "attention" as const;
+    return null;
+  };
   const filteredClients = clients
     .filter((client) =>
       client.name.toLowerCase().includes(query.trim().toLowerCase()),
     )
     .filter((client) =>
       attentionOnly
-        ? client.attention === "overdue" || client.attention === "attention"
+        ? Boolean(operationalAttention(client))
         : true,
     )
     .filter((client) => (activeOnly ? client.category === "Активный" : true))
     .sort((a, b) =>
       sortBy === "name"
         ? a.name.localeCompare(b.name, "ru")
-        : attentionRank(a.attention) - attentionRank(b.attention),
+        : attentionRank(operationalAttention(a) ?? "calm") -
+          attentionRank(operationalAttention(b) ?? "calm"),
     );
 
   return (
@@ -2301,34 +2361,41 @@ function ClientsList({
         </span>
         <strong>{filteredClients.length} клиентов</strong>
       </div>
-      {filteredClients.map((client) => (
-        <button
-          className="client-card"
-          key={client.id}
-          onClick={() => onOpenClient(client)}
-        >
-          <div className="client-card-head">
-            <div>
-              <h2>{client.name}</h2>
-              <span>
-                {client.category} · {client.status}
-              </span>
+      {filteredClients.map((client) => {
+        const taskAttention = operationalAttention(client);
+        return (
+          <button
+            className="client-card"
+            key={client.id}
+            onClick={() => onOpenClient(client)}
+          >
+            <div className="client-card-head">
+              <div>
+                <h2>{client.name}</h2>
+                <span>
+                  {client.category} · {client.status}
+                </span>
+              </div>
+              <span
+                className={`client-indicator ${taskAttention ?? client.attention}`}
+                title={
+                  taskAttention
+                    ? indicatorLabels[taskAttention]
+                    : indicatorLabels[client.attention]
+                }
+              />
             </div>
-            <span
-              className={`client-indicator ${client.attention}`}
-              title={indicatorLabels[client.attention]}
-            />
-          </div>
-          <div className="client-next">
-            <span>Следующее</span>
-            <strong>{client.nextAction}</strong>
-          </div>
-          <div className="client-card-foot">
-            <span>Контакт: {client.lastContact}</span>
-            <span>{client.amount}</span>
-          </div>
-        </button>
-      ))}
+            <div className="client-next">
+              <span>Следующее</span>
+              <strong>{client.nextAction}</strong>
+            </div>
+            <div className="client-card-foot">
+              <span>Контакт: {client.lastContact}</span>
+              <span>{client.amount}</span>
+            </div>
+          </button>
+        );
+      })}
       {filteredClients.length === 0 && (
         <div className="empty-state">
           {clients.length === 0 ? <Users size={22} /> : <Search size={22} />}
@@ -2355,8 +2422,6 @@ function ClientScreen({
   view,
   onViewChange,
   timeline,
-  taskCompleted,
-  taskPostponed,
   onCompleteTask,
   onPostponeTask,
   onOpenEvents,
@@ -2367,8 +2432,6 @@ function ClientScreen({
   view: ClientView;
   onViewChange: (view: ClientView) => void;
   timeline: TimelineItem[];
-  taskCompleted: boolean;
-  taskPostponed: boolean;
   onCompleteTask: () => void;
   onPostponeTask: () => void;
   onOpenEvents: () => void;
@@ -2407,8 +2470,6 @@ function ClientScreen({
         <ClientDashboard
           client={client}
           timeline={timeline}
-          taskCompleted={taskCompleted}
-          taskPostponed={taskPostponed}
           onCompleteTask={onCompleteTask}
           onPostponeTask={onPostponeTask}
           onOpenEvents={onOpenEvents}
@@ -2423,16 +2484,12 @@ function ClientScreen({
 function ClientDashboard({
   client,
   timeline,
-  taskCompleted,
-  taskPostponed,
   onCompleteTask,
   onPostponeTask,
   onOpenEvents,
 }: {
   client: Client;
   timeline: TimelineItem[];
-  taskCompleted: boolean;
-  taskPostponed: boolean;
   onCompleteTask: () => void;
   onPostponeTask: () => void;
   onOpenEvents: () => void;
@@ -2459,18 +2516,29 @@ function ClientDashboard({
     },
   };
   const attentionState = attentionCopy[client.attention];
-  const currentTask = timeline.find(
-    (item) => item.kind === "Задача" && !item.completed,
+  const currentTask = sortWorkItems(
+    timeline.filter((item) => item.kind === "Задача" && !item.completed),
+  )[0];
+  const latestCompletedTask = timeline.find(
+    (item) => item.kind === "Задача" && item.completed,
   );
-  const nextMeeting = timeline.find(
-    (item) => item.kind === "Встреча" && !item.completed,
-  );
+  const displayedTask = currentTask ?? latestCompletedTask;
+  const currentTaskState = displayedTask ? workState(displayedTask) : "flow";
+  const taskPresentation: Record<
+    WorkState,
+    { label: string; className: string }
+  > = {
+    overdue: { label: "Просрочено", className: "task-overdue" },
+    today: { label: "Требует внимания", className: "task-attention" },
+    upcoming: { label: "Запланировано", className: "task-upcoming" },
+    flow: { label: "В потоке", className: "task-flow" },
+    completed: { label: "Выполнено", className: "task-completed" },
+  };
+  const taskState = taskPresentation[currentTaskState];
+  const nextMeeting = sortWorkItems(
+    timeline.filter((item) => item.kind === "Встреча" && !item.completed),
+  )[0];
   const lastContact = timeline.find((item) => item.kind === "Контакт");
-  const taskClass = taskCompleted
-    ? "task-completed"
-    : taskPostponed
-      ? "task-postponed"
-      : `task-${client.attention}`;
   const confirmedSummary =
     typeof client.context.summary === "string" && client.context.summary.trim()
       ? client.context.summary
@@ -2528,38 +2596,30 @@ function ClientDashboard({
 
   return (
     <div className="client-dashboard">
-      <section className={`current-task-card ${taskClass}`}>
+      <section className={`current-task-card ${taskState.className}`}>
         <div className="task-label">
           <span>Текущая задача</span>
           <span
             className={
-              taskCompleted
+              currentTaskState === "completed"
                 ? "complete-pill"
-                : taskPostponed
-                  ? "postponed-pill"
-                  : `task-status-pill ${client.attention}`
+                : `task-status-pill ${currentTaskState}`
             }
           >
-            {!currentTask
+            {!displayedTask
               ? "Нет"
-              : taskCompleted
-              ? "Выполнено"
-              : taskPostponed
-                ? "Перенесено"
-                : attentionState.label}
+              : taskState.label}
           </span>
         </div>
-        <h2>{currentTask?.title ?? "Текущей задачи нет"}</h2>
+        <h2>{displayedTask?.title ?? "Текущей задачи нет"}</h2>
         <p>
-          {!currentTask
+          {!displayedTask
             ? "Создайте задачу голосом или через action-кнопку"
-            : taskCompleted
-            ? "Завершено только что"
-            : taskPostponed
-              ? `Новый срок: ${currentTask.date}`
-              : currentTask.date}
+            : currentTaskState === "completed"
+              ? "Задача завершена"
+              : displayedTask.date}
         </p>
-        {currentTask && !taskCompleted && (
+        {currentTask && (
           <div className="task-actions">
             <button onClick={onCompleteTask}>Выполнено</button>
             <button onClick={onPostponeTask}>Перенести</button>

@@ -744,6 +744,16 @@ h1 {
 }
 .metric-primary span, .metric-primary small { color: rgba(255,255,255,.62); }
 .danger-text { color: var(--red); }
+.client-metric-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.client-metric-grid .metric-primary { grid-column: 1 / -1; min-height: 82px; }
+.metric-flow strong { color: var(--secondary); }
+.metric-completed {
+  border-color: rgba(52,199,89,.25);
+  background: rgba(52,199,89,.08);
+}
+.metric-completed strong { color: var(--green); }
 .attention-panel, .today-panel, .summary-card {
   margin-top: 9px;
   padding: 14px;
@@ -822,6 +832,7 @@ h1 {
 .timeline-pin { width: 6px; height: 6px; margin-top: 4px; }
 .timeline-pin.green, .timeline-marker.green { background: var(--green); }
 .timeline-pin.blue, .timeline-marker.blue { background: var(--blue); }
+.timeline-pin.orange, .timeline-marker.orange { background: var(--orange); }
 .timeline-pin.red, .timeline-marker.red { background: var(--red); }
 .timeline-pin.gray, .timeline-marker.gray { background: var(--tertiary); }
 
@@ -952,12 +963,10 @@ h1 {
 .current-task-card.task-completed {
   border-color: var(--green);
 }
-.current-task-card.task-postponed {
-  border-color: var(--orange);
-}
+.current-task-card.task-overdue { border-color: var(--red); }
 .current-task-card.task-attention { border-color: var(--orange); }
-.current-task-card.task-active { border-color: var(--blue); }
-.current-task-card.task-calm { border-color: var(--separator); }
+.current-task-card.task-upcoming { border-color: var(--blue); }
+.current-task-card.task-flow { border-color: var(--tertiary); }
 .complete-pill {
   padding: 4px 8px;
   border-radius: 999px;
@@ -966,15 +975,13 @@ h1 {
   font-size: 10px;
   font-weight: 700;
 }
-.postponed-pill,
 .task-status-pill {
   padding: 4px 8px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
 }
-.postponed-pill,
-.task-status-pill.attention {
+.task-status-pill.today {
   background: rgba(255,149,0,.11);
   color: var(--orange);
 }
@@ -982,11 +989,11 @@ h1 {
   background: rgba(255,59,48,.1);
   color: var(--red);
 }
-.task-status-pill.active {
+.task-status-pill.upcoming {
   background: var(--blue-soft);
   color: var(--blue);
 }
-.task-status-pill.calm {
+.task-status-pill.flow {
   background: var(--surface-soft);
   color: var(--secondary);
 }
@@ -1201,7 +1208,7 @@ h1 {
   background: var(--action-bg);
   box-shadow: 0 5px 17px rgba(0,0,0,.22);
   color: var(--action-fg);
-  touch-action: none;
+  touch-action: manipulation;
   user-select: none;
   transition: transform 120ms ease, background 120ms ease;
 }
