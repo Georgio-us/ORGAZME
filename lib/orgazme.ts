@@ -49,6 +49,7 @@ export function serializeClient(client: typeof clients.$inferSelect) {
     nextAction: client.nextAction,
     lastContact: contact.label,
     lastContactDays: contact.days,
+    lastContactAt: client.lastContactAt?.toISOString() ?? null,
     amount: client.amount,
     context: client.context ?? {},
   };

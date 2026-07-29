@@ -14,12 +14,15 @@ import {
   CircleStop,
   Clock3,
   Contact,
+  Download,
   House,
+  Keyboard,
   LayoutDashboard,
   Layers3,
   List,
   Monitor,
   Moon,
+  MessageCircle,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -63,6 +66,7 @@ type Client = {
   nextAction: string;
   lastContact: string;
   lastContactDays: number;
+  lastContactAt?: string | null;
   amount: string;
   context: Record<string, unknown>;
 };
@@ -146,6 +150,11 @@ type AIAnalysis = {
   reasoningEffort: string;
 };
 
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 type WorkspaceSnapshot = {
   clients: Client[];
   timelines: Record<string, TimelineItem[]>;
@@ -180,6 +189,22 @@ const actionIcons: Record<ActionType, LucideIcon> = {
   contact: Contact,
   note: StickyNote,
 };
+
+const eventLabelToKind: Record<string, ActionType> = {
+  Событие: "event",
+  Задача: "task",
+  Встреча: "meeting",
+  Контакт: "contact",
+  Заметка: "note",
+};
+
+function toLocalDateTimeInput(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
 
 const indicatorLabels = {
   overdue: "Есть просроченная задача",
@@ -370,6 +395,8 @@ export default function Home() {
   const [clientEditOpen, setClientEditOpen] = useState(false);
   const [attentionOpen, setAttentionOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<TimelineItem | null>(null);
+  const [manualEventOpen, setManualEventOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [completedTasks, setCompletedTasks] = useState<string[]>([]);
   const [postponedTasks, setPostponedTasks] = useState<string[]>([]);
@@ -620,6 +647,103 @@ export default function Home() {
       showToast(error instanceof Error ? error.message : "Ошибка сохранения");
       return null;
     }
+  };
+
+  const createEvent = async (payload: Record<string, unknown>) => {
+    try {
+      const response = await fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json()) as {
+        event?: TimelineItem;
+        error?: string;
+      };
+      if (!response.ok || !data.event) {
+        throw new Error(data.error || "Не удалось создать запись.");
+      }
+      const clientId = String(payload.clientId ?? "");
+      setTimelines((current) => ({
+        ...current,
+        [clientId]: [data.event!, ...(current[clientId] ?? [])],
+      }));
+      if (payload.kind === "contact") {
+        const contactAt = String(payload.occurredAt ?? new Date().toISOString());
+        const updateContact = (client: Client) =>
+          client.id === clientId
+            ? {
+                ...client,
+                lastContact: "сегодня",
+                lastContactDays: 0,
+                lastContactAt: contactAt,
+              }
+            : client;
+        setClientRecords((current) => current.map(updateContact));
+        setSelectedClient((current) => (current ? updateContact(current) : null));
+      }
+      setManualEventOpen(false);
+      showToast("Запись сохранена");
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Ошибка сохранения");
+      return false;
+    }
+  };
+
+  const processTextCommand = async (text: string) => {
+    const response = await fetch("/api/ai/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        clientId:
+          screen === "client" && selectedClient ? selectedClient.id : null,
+      }),
+    });
+    const data = (await response.json()) as {
+      transcript?: string;
+      proposals?: AIProposal[];
+      coverage?: AICoverage;
+      analysis?: AIAnalysis;
+      error?: string;
+    };
+    if (!response.ok || !data.transcript || !data.proposals) {
+      throw new Error(data.error || "AI не смог разобрать команду.");
+    }
+    setAssistantOpen(false);
+    setAiTranscript(data.transcript);
+    setAiProposalsList(data.proposals);
+    setAiCoverage(data.coverage ?? null);
+    setAiAnalysis(data.analysis ?? null);
+    setProposalStates(
+      Object.fromEntries(
+        data.proposals.map((proposal) => [proposal.id, "pending"]),
+      ),
+    );
+    setVoiceIntent(null);
+    setVoiceState("review");
+  };
+
+  const exportWorkspace = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      clients: clientRecords.map((client) => ({
+        ...client,
+        events: timelines[client.id] ?? [],
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `orgazme-export-${dateKey(new Date())}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    showToast("JSON экспортирован");
   };
 
   const beginRecording = async (
@@ -1091,8 +1215,45 @@ export default function Home() {
               </button>
             </div>
             <p className="sheet-description">
-              Выберите тип — голосовая запись начнётся сразу.
+              Спросите AI, введите команду или добавьте запись самостоятельно.
             </p>
+            <div className="action-mode-grid">
+              <button
+                onClick={() => {
+                  setActionOpen(false);
+                  setAssistantOpen(true);
+                }}
+              >
+                <span><MessageCircle size={17} /></span>
+                <strong>AI-ассистент</strong>
+                <small>Диалог или команда</small>
+              </button>
+              <button
+                disabled={clientRecords.length === 0}
+                onClick={() => {
+                  setActionOpen(false);
+                  setManualEventOpen(true);
+                }}
+              >
+                <span><Keyboard size={17} /></span>
+                <strong>Вручную</strong>
+                <small>Событие, задача, встреча</small>
+              </button>
+              {screen !== "client" && (
+                <button
+                  className="wide"
+                  onClick={() => {
+                    setActionOpen(false);
+                    setNewClientOpen(true);
+                  }}
+                >
+                  <span><Plus size={17} /></span>
+                  <strong>Новый клиент</strong>
+                  <small>Создать и заполнить вручную</small>
+                </button>
+              )}
+            </div>
+            <span className="action-section-label">Голосовая команда</span>
             <div className="action-grid">
               {(Object.keys(actionLabels) as ActionType[]).map((type) => (
                 <ActionChoice
@@ -1101,19 +1262,6 @@ export default function Home() {
                   onClick={() => startContextualRecording(type)}
                 />
               ))}
-              {screen !== "client" && (
-                <button
-                  className="action-choice action-choice-wide"
-                  onClick={() => {
-                    setActionOpen(false);
-                    setNewClientOpen(true);
-                  }}
-                >
-                  <span><Plus size={17} /></span>
-                  Новый клиент
-                  <ChevronRight size={16} className="choice-chevron" />
-                </button>
-              )}
             </div>
           </section>
         </div>
@@ -1181,7 +1329,11 @@ export default function Home() {
           }}
           onSelect={(label) => {
             setMenuOpen(false);
-            showToast(`${label}: раздел открыт`);
+            if (label === "Экспорт данных") {
+              exportWorkspace();
+            } else {
+              showToast(`${label}: раздел открыт`);
+            }
           }}
         />
       )}
@@ -1253,14 +1405,40 @@ export default function Home() {
           onClose={() => setEditingEvent(null)}
           onSave={(updatedEvent) => {
             void updateEvent(updatedEvent.id, {
+              kind: eventLabelToKind[updatedEvent.kind] ?? "event",
               title: updatedEvent.title,
               details: updatedEvent.detail,
+              dueAt: updatedEvent.dueAt ?? null,
+              dueDate: updatedEvent.dueDate ?? null,
+              occurredAt: updatedEvent.occurredAt,
+              completed: Boolean(updatedEvent.completed),
             }).then((saved) => {
               if (!saved) return;
               setEditingEvent(null);
               showToast("Событие обновлено в базе");
             });
           }}
+        />
+      )}
+
+      {manualEventOpen && (
+        <ManualEventSheet
+          clients={clientRecords}
+          initialClientId={
+            screen === "client" && selectedClient ? selectedClient.id : ""
+          }
+          onClose={() => setManualEventOpen(false)}
+          onSave={(payload) => {
+            void createEvent(payload);
+          }}
+        />
+      )}
+
+      {assistantOpen && (
+        <AssistantSheet
+          client={screen === "client" ? selectedClient : null}
+          onClose={() => setAssistantOpen(false)}
+          onCommand={processTextCommand}
         />
       )}
 
@@ -2944,6 +3122,304 @@ function TodayActionsSheet({
   );
 }
 
+function ManualEventSheet({
+  clients,
+  initialClientId,
+  onClose,
+  onSave,
+}: {
+  clients: Client[];
+  initialClientId: string;
+  onClose: () => void;
+  onSave: (payload: Record<string, unknown>) => void;
+}) {
+  const [clientId, setClientId] = useState(
+    initialClientId || clients[0]?.id || "",
+  );
+  const [kind, setKind] = useState<ActionType>("task");
+  const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
+  const [occurredAt, setOccurredAt] = useState(
+    toLocalDateTimeInput(new Date().toISOString()),
+  );
+  const [completed, setCompleted] = useState(false);
+  const isScheduled = kind === "task" || kind === "meeting";
+
+  return (
+    <div className="overlay">
+      <section className="bottom-sheet form-sheet">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">Ручной ввод</span>
+            <h2>Новая запись</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="form-stack">
+          <label>
+            <span>Клиент</span>
+            <select
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
+            >
+              {clients.map((client) => (
+                <option value={client.id} key={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Тип записи</span>
+            <select
+              value={kind}
+              onChange={(event) => setKind(event.target.value as ActionType)}
+            >
+              {(Object.keys(actionLabels) as ActionType[]).map((value) => (
+                <option value={value} key={value}>
+                  {actionLabels[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Название</span>
+            <input
+              autoFocus
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Что произошло или что нужно сделать"
+            />
+          </label>
+          <label>
+            <span>Описание</span>
+            <textarea
+              value={details}
+              onChange={(event) => setDetails(event.target.value)}
+              placeholder="Любой дополнительный контекст"
+            />
+          </label>
+          {isScheduled ? (
+            <div className="form-two-columns">
+              <label>
+                <span>Дата выполнения</span>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) => setDueDate(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Время, если известно</span>
+                <input
+                  type="time"
+                  value={dueTime}
+                  onChange={(event) => setDueTime(event.target.value)}
+                />
+              </label>
+            </div>
+          ) : (
+            <label>
+              <span>Когда произошло</span>
+              <input
+                type="datetime-local"
+                value={occurredAt}
+                onChange={(event) => setOccurredAt(event.target.value)}
+              />
+            </label>
+          )}
+          <label className="form-checkbox">
+            <input
+              type="checkbox"
+              checked={completed}
+              onChange={(event) => setCompleted(event.target.checked)}
+            />
+            <span>Уже выполнено</span>
+          </label>
+        </div>
+        <button
+          className="primary-button"
+          disabled={!clientId || !title.trim()}
+          onClick={() => {
+            const dueAt =
+              dueDate && dueTime
+                ? new Date(`${dueDate}T${dueTime}`).toISOString()
+                : null;
+            onSave({
+              clientId,
+              kind,
+              title: title.trim(),
+              details: details.trim(),
+              dueAt,
+              dueDate: dueAt ? null : dueDate || null,
+              occurredAt: occurredAt
+                ? new Date(occurredAt).toISOString()
+                : new Date().toISOString(),
+              completed,
+            });
+          }}
+        >
+          Сохранить запись
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function AssistantSheet({
+  client,
+  onClose,
+  onCommand,
+}: {
+  client: Client | null;
+  onClose: () => void;
+  onCommand: (text: string) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"chat" | "command">("chat");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setError("");
+    setInput("");
+    setLoading(true);
+    try {
+      if (mode === "command") {
+        await onCommand(text);
+        return;
+      }
+      const nextMessages: ChatMessage[] = [
+        ...messages,
+        { role: "user", content: text },
+      ];
+      setMessages(nextMessages);
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: client?.id ?? null,
+          messages: nextMessages,
+        }),
+      });
+      const data = (await response.json()) as {
+        reply?: string;
+        error?: string;
+      };
+      if (!response.ok || !data.reply) {
+        throw new Error(data.error || "AI не ответил.");
+      }
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", content: data.reply! },
+      ]);
+    } catch (sendError) {
+      setError(
+        sendError instanceof Error
+          ? sendError.message
+          : "Не удалось выполнить запрос.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="overlay">
+      <section className="bottom-sheet assistant-sheet">
+        <div className="sheet-handle" />
+        <div className="sheet-heading">
+          <div>
+            <span className="eyebrow">AI · {client?.name ?? "Весь бизнес"}</span>
+            <h2>Ассистент</h2>
+          </div>
+          <button className="close-button" onClick={onClose} aria-label="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="assistant-mode-switch">
+          <button
+            className={mode === "chat" ? "active" : ""}
+            onClick={() => setMode("chat")}
+          >
+            Диалог
+          </button>
+          <button
+            className={mode === "command" ? "active" : ""}
+            onClick={() => setMode("command")}
+          >
+            Команда
+          </button>
+        </div>
+        <p className="assistant-mode-description">
+          {mode === "chat"
+            ? "Спросите о состоянии, финансах, рисках или следующих шагах."
+            : "Опишите изменение. Перед сохранением AI покажет редактируемые карточки."}
+        </p>
+        {mode === "chat" && (
+          <div className="assistant-messages">
+            {messages.length === 0 ? (
+              <button
+                className="assistant-suggestion"
+                onClick={() =>
+                  setInput(
+                    client
+                      ? "Что сейчас важно по этому клиенту?"
+                      : "Что сейчас требует моего внимания?",
+                  )
+                }
+              >
+                {client
+                  ? "Что сейчас важно по этому клиенту?"
+                  : "Что сейчас требует моего внимания?"}
+              </button>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  className={`assistant-message ${message.role}`}
+                  key={`${message.role}-${index}`}
+                >
+                  {message.content}
+                </div>
+              ))
+            )}
+            {loading && <div className="assistant-thinking">AI анализирует…</div>}
+          </div>
+        )}
+        {error && <p className="assistant-error">{error}</p>}
+        <div className="assistant-compose">
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+            placeholder={
+              mode === "chat"
+                ? "Задайте вопрос…"
+                : "Например: поставь задачу связаться 12 августа…"
+            }
+          />
+          <button disabled={!input.trim() || loading} onClick={() => void send()}>
+            {mode === "chat" ? "Отправить" : "Разобрать"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function EventEditSheet({
   event,
   onClose,
@@ -2955,7 +3431,23 @@ function EventEditSheet({
 }) {
   const [title, setTitle] = useState(event.title);
   const [detail, setDetail] = useState(event.detail);
-  const [date, setDate] = useState(event.date);
+  const [kind, setKind] = useState<ActionType>(
+    eventLabelToKind[event.kind] ?? "event",
+  );
+  const [dueDate, setDueDate] = useState(event.dueDate ?? "");
+  const [dueTime, setDueTime] = useState(
+    event.dueAt
+      ? new Intl.DateTimeFormat("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date(event.dueAt))
+      : "",
+  );
+  const [occurredAt, setOccurredAt] = useState(
+    toLocalDateTimeInput(event.occurredAt),
+  );
+  const [completed, setCompleted] = useState(Boolean(event.completed));
 
   return (
     <div className="overlay">
@@ -2972,6 +3464,21 @@ function EventEditSheet({
         </div>
         <div className="form-stack">
           <label>
+            <span>Тип записи</span>
+            <select
+              value={kind}
+              onChange={(inputEvent) =>
+                setKind(inputEvent.target.value as ActionType)
+              }
+            >
+              {(Object.keys(actionLabels) as ActionType[]).map((value) => (
+                <option value={value} key={value}>
+                  {actionLabels[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>Название</span>
             <input
               autoFocus
@@ -2986,25 +3493,62 @@ function EventEditSheet({
               onChange={(inputEvent) => setDetail(inputEvent.target.value)}
             />
           </label>
+          <div className="form-two-columns">
+            <label>
+              <span>Срок или дата</span>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(inputEvent) => setDueDate(inputEvent.target.value)}
+              />
+            </label>
+            <label>
+              <span>Время</span>
+              <input
+                type="time"
+                value={dueTime}
+                onChange={(inputEvent) => setDueTime(inputEvent.target.value)}
+              />
+            </label>
+          </div>
           <label>
-            <span>Дата и время</span>
+            <span>Дата появления в истории</span>
             <input
-              value={date}
-              onChange={(inputEvent) => setDate(inputEvent.target.value)}
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(inputEvent) => setOccurredAt(inputEvent.target.value)}
             />
+          </label>
+          <label className="form-checkbox">
+            <input
+              type="checkbox"
+              checked={completed}
+              onChange={(inputEvent) => setCompleted(inputEvent.target.checked)}
+            />
+            <span>Выполнено</span>
           </label>
         </div>
         <button
           className="primary-button"
           disabled={!title.trim()}
-          onClick={() =>
+          onClick={() => {
+            const dueAt =
+              dueDate && dueTime
+                ? new Date(`${dueDate}T${dueTime}`).toISOString()
+                : null;
             onSave({
               ...event,
+              kind: actionLabels[kind],
               title: title.trim(),
               detail: detail.trim(),
-              date: date.trim(),
-            })
-          }
+              dueAt,
+              dueDate: dueAt ? null : dueDate || null,
+              occurredAt: occurredAt
+                ? new Date(occurredAt).toISOString()
+                : event.occurredAt,
+              completed,
+            });
+          }}
         >
           Сохранить изменения
         </button>
@@ -3024,7 +3568,11 @@ function NewClientSheet({
   const [category, setCategory] =
     useState<Client["category"]>("Потенциальный");
   const [nextAction, setNextAction] = useState("");
-  const [amount, setAmount] = useState("");
+  const [summary, setSummary] = useState("");
+  const [startedAt, setStartedAt] = useState("");
+  const [currency, setCurrency] = useState("EUR");
+  const [received, setReceived] = useState("");
+  const [outstanding, setOutstanding] = useState("");
 
   const save = () => {
     if (!name.trim()) return;
@@ -3037,8 +3585,19 @@ function NewClientSheet({
       nextAction: nextAction.trim() || "Определить следующее действие",
       lastContact: "только что",
       lastContactDays: 0,
-      amount: amount.trim() || "Не указано",
-      context: {},
+      lastContactAt: null,
+      amount: Number(outstanding)
+        ? moneyLabel(Number(outstanding), currency)
+        : "Не указано",
+      context: {
+        ...(summary.trim() ? { summary: summary.trim() } : {}),
+        ...(startedAt ? { relationship: { startedAt } } : {}),
+        financial: {
+          currency,
+          received: Number(received) || 0,
+          outstanding: Number(outstanding) || 0,
+        },
+      },
     });
   };
 
@@ -3088,11 +3647,50 @@ function NewClientSheet({
             />
           </label>
           <label>
-            <span>Финансовый контекст</span>
+            <span>Краткое описание</span>
+            <textarea
+              value={summary}
+              onChange={(event) => setSummary(event.target.value)}
+              placeholder="Чем занимается клиент и что сейчас происходит"
+            />
+          </label>
+          <label>
+            <span>Начало работы</span>
             <input
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              placeholder="Например, €2 000"
+              type="date"
+              value={startedAt}
+              onChange={(event) => setStartedAt(event.target.value)}
+            />
+          </label>
+          <div className="form-two-columns">
+            <label>
+              <span>Валюта</span>
+              <select
+                value={currency}
+                onChange={(event) => setCurrency(event.target.value)}
+              >
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="UAH">UAH</option>
+              </select>
+            </label>
+            <label>
+              <span>Получено</span>
+              <input
+                inputMode="decimal"
+                value={received}
+                onChange={(event) => setReceived(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+          <label>
+            <span>К получению / долг</span>
+            <input
+              inputMode="decimal"
+              value={outstanding}
+              onChange={(event) => setOutstanding(event.target.value)}
+              placeholder="0"
             />
           </label>
         </div>
@@ -3176,7 +3774,7 @@ function MainMenuSheet({
   onSelect: (label: string) => void;
 }) {
   const items = [
-    { label: "Экспорт данных", icon: BriefcaseBusiness },
+    { label: "Экспорт данных", icon: Download },
     { label: "О приложении", icon: CircleAlert },
   ];
   return (
@@ -3289,11 +3887,111 @@ function ClientEditSheet({
   onClose: () => void;
   onSave: (client: Client) => void;
 }) {
+  const initialFinancial = asRecord(client.context.financial);
+  const initialRelationship = asRecord(client.context.relationship);
   const [name, setName] = useState(client.name);
   const [category, setCategory] = useState(client.category);
   const [status, setStatus] = useState(client.status);
   const [nextAction, setNextAction] = useState(client.nextAction);
-  const [amount, setAmount] = useState(client.amount);
+  const [summary, setSummary] = useState(asText(client.context.summary));
+  const [relationshipNote, setRelationshipNote] = useState(
+    asText(initialRelationship.quality),
+  );
+  const [startedAt, setStartedAt] = useState(
+    asText(initialRelationship.startedAt) ||
+      asText(initialRelationship.ongoingWorkStartedAt),
+  );
+  const [lastContactAt, setLastContactAt] = useState(
+    toLocalDateTimeInput(client.lastContactAt),
+  );
+  const [currency, setCurrency] = useState(
+    asText(initialFinancial.currency, "EUR"),
+  );
+  const [contracted, setContracted] = useState(
+    String(
+      asNumber(initialFinancial.contractedOrEarned) ||
+        asNumber(initialFinancial.contractValue) ||
+        "",
+    ),
+  );
+  const [received, setReceived] = useState(
+    String(asNumber(initialFinancial.received) || ""),
+  );
+  const [outstanding, setOutstanding] = useState(
+    String(
+      asNumber(initialFinancial.outstanding) ||
+        asNumber(initialFinancial.totalReceivable) ||
+        "",
+    ),
+  );
+  const [expected, setExpected] = useState(
+    String(asNumber(initialFinancial.expectedRenewalRevenue) || ""),
+  );
+  const [potential, setPotential] = useState(
+    String(
+      asNumber(initialFinancial.potentialUpsellTotal) ||
+        asNumber(initialFinancial.knownPotentialUpsellMinimum) ||
+        "",
+    ),
+  );
+  const [rawContext, setRawContext] = useState(
+    JSON.stringify(client.context, null, 2),
+  );
+  const [jsonError, setJsonError] = useState("");
+
+  const save = () => {
+    let parsed: Record<string, unknown>;
+    try {
+      const candidate = JSON.parse(rawContext || "{}") as unknown;
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw new Error("Контекст должен быть JSON-объектом.");
+      }
+      parsed = candidate as Record<string, unknown>;
+    } catch (error) {
+      setJsonError(
+        error instanceof Error ? error.message : "Проверьте синтаксис JSON.",
+      );
+      return;
+    }
+    const numberFrom = (value: string) =>
+      Number(value.replace(/\s/g, "").replace(",", ".")) || 0;
+    const nextRelationship = {
+      ...asRecord(parsed.relationship),
+      ...(startedAt ? { startedAt } : {}),
+      ...(relationshipNote.trim()
+        ? { quality: relationshipNote.trim() }
+        : {}),
+    };
+    const nextFinancial = {
+      ...asRecord(parsed.financial),
+      currency: currency.trim().toUpperCase() || "EUR",
+      contractedOrEarned: numberFrom(contracted),
+      received: numberFrom(received),
+      outstanding: numberFrom(outstanding),
+      expectedRenewalRevenue: numberFrom(expected),
+      potentialUpsellTotal: numberFrom(potential),
+    };
+    const context = {
+      ...parsed,
+      summary: summary.trim(),
+      relationship: nextRelationship,
+      financial: nextFinancial,
+    };
+    onSave({
+      ...client,
+      name: name.trim(),
+      category,
+      status: status.trim(),
+      nextAction: nextAction.trim() || "Определить следующее действие",
+      lastContactAt: lastContactAt
+        ? new Date(lastContactAt).toISOString()
+        : null,
+      amount: numberFrom(outstanding)
+        ? moneyLabel(numberFrom(outstanding), nextFinancial.currency)
+        : "Не указано",
+      context,
+    });
+  };
 
   return (
     <div className="overlay">
@@ -3339,23 +4037,129 @@ function ClientEditSheet({
             />
           </label>
           <label>
-            <span>Финансовый контекст</span>
-            <input value={amount} onChange={(event) => setAmount(event.target.value)} />
+            <span>Краткая сводка</span>
+            <textarea
+              value={summary}
+              onChange={(event) => setSummary(event.target.value)}
+              placeholder="Главное о клиенте и текущей работе"
+            />
           </label>
+          <label>
+            <span>Наблюдения об отношениях</span>
+            <textarea
+              value={relationshipNote}
+              onChange={(event) => setRelationshipNote(event.target.value)}
+              placeholder="Стиль общения, доверие, блокеры, склонность к рекомендациям"
+            />
+          </label>
+          <div className="form-two-columns">
+            <label>
+              <span>Начало работы</span>
+              <input
+                type="date"
+                value={startedAt}
+                onChange={(event) => setStartedAt(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Последний контакт</span>
+              <input
+                type="datetime-local"
+                value={lastContactAt}
+                onChange={(event) => setLastContactAt(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="form-section-title">
+            <span>Финансы</span>
+            <small>Эти суммы сразу попадут в финансовый раздел</small>
+          </div>
+          <div className="form-two-columns">
+            <label>
+              <span>Валюта</span>
+              <select
+                value={currency}
+                onChange={(event) => setCurrency(event.target.value)}
+              >
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="UAH">UAH</option>
+              </select>
+            </label>
+            <label>
+              <span>Сумма договорённостей</span>
+              <input
+                inputMode="decimal"
+                value={contracted}
+                onChange={(event) => setContracted(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+          <div className="form-two-columns">
+            <label>
+              <span>Получено</span>
+              <input
+                inputMode="decimal"
+                value={received}
+                onChange={(event) => setReceived(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label>
+              <span>К получению / долг</span>
+              <input
+                inputMode="decimal"
+                value={outstanding}
+                onChange={(event) => setOutstanding(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+          <div className="form-two-columns">
+            <label>
+              <span>Ожидается</span>
+              <input
+                inputMode="decimal"
+                value={expected}
+                onChange={(event) => setExpected(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label>
+              <span>Потенциал upsell</span>
+              <input
+                inputMode="decimal"
+                value={potential}
+                onChange={(event) => setPotential(event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+          <details className="json-editor">
+            <summary>Расширенный JSON-контекст</summary>
+            <p>
+              Здесь доступны все детали, включая услуги, платежи, upsell и
+              заметки. Поля выше при сохранении обновят соответствующие ключи.
+            </p>
+            <textarea
+              spellCheck={false}
+              value={rawContext}
+              onChange={(event) => {
+                setRawContext(event.target.value);
+                setJsonError("");
+              }}
+            />
+            {jsonError && <small className="form-error">{jsonError}</small>}
+          </details>
+          <div className="json-save-note">
+            После сохранения этот JSON станет единым контекстом для интерфейса и AI.
+          </div>
         </div>
         <button
           className="primary-button"
           disabled={!name.trim() || !status.trim()}
-          onClick={() =>
-            onSave({
-              ...client,
-              name: name.trim(),
-              category,
-              status: status.trim(),
-              nextAction: nextAction.trim() || "Определить следующее действие",
-              amount: amount.trim() || "Не указано",
-            })
-          }
+          onClick={save}
         >
           Сохранить изменения
         </button>

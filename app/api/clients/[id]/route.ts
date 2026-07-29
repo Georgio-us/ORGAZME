@@ -6,6 +6,16 @@ import { OWNER_ID, serializeClient } from "@/lib/orgazme";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
@@ -39,6 +49,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           : {}),
         ...(typeof body.amount === "string" && body.amount.trim()
           ? { amount: body.amount.trim() }
+          : {}),
+        ...(body.lastContactAt === null
+          ? { lastContactAt: null }
+          : parseDate(body.lastContactAt)
+            ? { lastContactAt: parseDate(body.lastContactAt) }
+            : {}),
+        ...(isRecord(body.context)
+          ? {
+              context: {
+                ...body.context,
+                source: {
+                  type: "manual_edit",
+                  savedAt: new Date().toISOString(),
+                },
+              },
+            }
           : {}),
         ...(typeof body.archived === "boolean"
           ? { archived: body.archived }

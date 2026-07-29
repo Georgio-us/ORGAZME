@@ -310,52 +310,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      !request.headers.get("content-type")?.toLowerCase().includes("multipart/form-data")
-    ) {
+    const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+    const isTextCommand = contentType.includes("application/json");
+    if (!isTextCommand && !contentType.includes("multipart/form-data")) {
       return NextResponse.json(
-        { error: "Ожидается голосовая запись в формате multipart/form-data." },
+        { error: "Ожидается голосовая запись или текстовая команда." },
         { status: 400 },
       );
     }
 
     await ensureWorkspace();
-    const formData = await request.formData();
-    const audio = formData.get("audio");
-    const intent = String(formData.get("intent") ?? "") || null;
-    const requestedClientId =
-      String(formData.get("clientId") ?? "").trim() || null;
-    const durationSeconds = Number(formData.get("durationSeconds") ?? 0);
+    let audio: File | null = null;
+    let intent: string | null = null;
+    let requestedClientId: string | null = null;
+    let durationSeconds = 0;
+    let suppliedText = "";
 
-    if (!(audio instanceof File) || audio.size === 0) {
-      return NextResponse.json(
-        { error: "Аудиозапись не получена." },
-        { status: 400 },
-      );
-    }
-    if (audio.size > 12 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "Запись слишком большая. Максимум — 12 МБ." },
-        { status: 413 },
-      );
+    if (isTextCommand) {
+      const body = (await request.json()) as Record<string, unknown>;
+      suppliedText = String(body.text ?? "").trim();
+      intent = String(body.intent ?? "").trim() || null;
+      requestedClientId = String(body.clientId ?? "").trim() || null;
+      if (!suppliedText) {
+        return NextResponse.json(
+          { error: "Текстовая команда пуста." },
+          { status: 400 },
+        );
+      }
+      if (suppliedText.length > 20_000) {
+        return NextResponse.json(
+          { error: "Текст слишком большой. Максимум — 20 000 символов." },
+          { status: 413 },
+        );
+      }
+    } else {
+      const formData = await request.formData();
+      const audioValue = formData.get("audio");
+      audio = audioValue instanceof File ? audioValue : null;
+      intent = String(formData.get("intent") ?? "") || null;
+      requestedClientId =
+        String(formData.get("clientId") ?? "").trim() || null;
+      durationSeconds = Number(formData.get("durationSeconds") ?? 0);
+      if (!audio || audio.size === 0) {
+        return NextResponse.json(
+          { error: "Аудиозапись не получена." },
+          { status: 400 },
+        );
+      }
+      if (audio.size > 12 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "Запись слишком большая. Максимум — 12 МБ." },
+          { status: 413 },
+        );
+      }
     }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const extension = audio.type.includes("mp4")
-      ? "m4a"
-      : audio.type.includes("ogg")
-        ? "ogg"
-        : audio.type.includes("wav")
-          ? "wav"
-        : "webm";
-    const transcriptResult = await openai.audio.transcriptions.create({
-      file: await toFile(Buffer.from(await audio.arrayBuffer()), `voice.${extension}`, {
-        type: audio.type || "audio/webm",
-      }),
-      model: process.env.OPENAI_TRANSCRIBE_MODEL ?? "gpt-4o-transcribe",
-      language: "ru",
-    });
-    const transcript = transcriptResult.text.trim();
+    let transcript = suppliedText;
+    if (audio) {
+      const extension = audio.type.includes("mp4")
+        ? "m4a"
+        : audio.type.includes("ogg")
+          ? "ogg"
+          : audio.type.includes("wav")
+            ? "wav"
+            : "webm";
+      const transcriptResult = await openai.audio.transcriptions.create({
+        file: await toFile(
+          Buffer.from(await audio.arrayBuffer()),
+          `voice.${extension}`,
+          {
+            type: audio.type || "audio/webm",
+          },
+        ),
+        model: process.env.OPENAI_TRANSCRIBE_MODEL ?? "gpt-4o-transcribe",
+        language: "ru",
+      });
+      transcript = transcriptResult.text.trim();
+    }
     if (!transcript) {
       return NextResponse.json(
         { error: "Не удалось распознать речь в записи." },
@@ -614,7 +646,7 @@ requiresClarification=true только когда без уточнения н�
         clientId: selectedClient?.id ?? null,
         intent,
         transcript,
-        mimeType: audio.type || null,
+        mimeType: audio?.type || "text/plain",
         durationSeconds: Number.isFinite(durationSeconds)
           ? Math.round(durationSeconds)
           : null,
