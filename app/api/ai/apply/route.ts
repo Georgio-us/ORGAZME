@@ -18,6 +18,7 @@ type ProposalPayload = {
   clientId: string | null;
   clientRef: string | null;
   dueAt: string | null;
+  dueDate: string | null;
   clientDraft: {
     name: string;
     category: "active" | "potential";
@@ -223,6 +224,10 @@ export async function POST(request: NextRequest) {
             details: payload.details,
             dueAt:
               dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt : undefined,
+            dueDate:
+              payload.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.dueDate)
+                ? payload.dueDate
+                : undefined,
             occurredAt: new Date(),
             source: "ai",
           });

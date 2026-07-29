@@ -30,6 +30,7 @@ type ParsedProposal = {
   clientId: string | null;
   clientRef: string | null;
   dueAt: string | null;
+  dueDate: string | null;
   clientDraft: {
     name: string;
     category: "active" | "potential";
@@ -66,6 +67,7 @@ const responseSchema = {
           "clientId",
           "clientRef",
           "dueAt",
+          "dueDate",
           "clientDraft",
           "clientPatch",
           "requiresClarification",
@@ -83,6 +85,11 @@ const responseSchema = {
           dueAt: {
             type: ["string", "null"],
             description: "ISO 8601 date with Europe/Madrid offset when known.",
+          },
+          dueDate: {
+            type: ["string", "null"],
+            description:
+              "Calendar date YYYY-MM-DD when a day is known but no exact time is given.",
           },
           clientDraft: {
             anyOf: [
@@ -227,6 +234,8 @@ export async function POST(request: NextRequest) {
 Правила времени:
 - Относительные даты считай от now в Europe/Madrid.
 - Если названа только встреча/задача и время без даты, выбери ближайшее будущее наступление этого времени: сегодня, если оно ещё не прошло, иначе завтра. Это безопасное рабочее предположение, requiresClarification=false.
+- Если известен день, но точное время не названо, заполни dueDate в формате YYYY-MM-DD, а dueAt оставь null. Никогда не подставляй фиктивное время.
+- Если известно точное время, заполни dueAt, а dueDate оставь null.
 - Не выдумывай время, сумму или деловой факт, которых нет в речи.
 
 requiresClarification=true только когда без уточнения нельзя построить применимое изменение. Каждый зависимый шаг должен ссылаться либо на clientId, либо на валидный clientRef. Верни все явно запрошенные действия отдельными предложениями.`,
@@ -293,6 +302,10 @@ requiresClarification=true только когда без уточнения н�
         ...proposal,
         clientId: proposedClientId,
         clientRef: proposedClientRef,
+        dueDate:
+          proposal.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(proposal.dueDate)
+            ? proposal.dueDate
+            : null,
         requiresClarification:
           proposal.requiresClarification ||
           missingClient ||

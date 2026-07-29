@@ -14,6 +14,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       typeof body.dueAt === "string" && body.dueAt
         ? new Date(body.dueAt)
         : undefined;
+    const dueDate =
+      typeof body.dueDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(body.dueDate)
+        ? body.dueDate
+        : undefined;
 
     const [updated] = await getDb()
       .update(events)
@@ -24,7 +29,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ...(typeof body.details === "string"
           ? { details: body.details.trim() }
           : {}),
-        ...(dueAt && !Number.isNaN(dueAt.getTime()) ? { dueAt } : {}),
+        ...(dueAt && !Number.isNaN(dueAt.getTime())
+          ? { dueAt, dueDate: null }
+          : {}),
+        ...(dueDate ? { dueDate, dueAt: null } : {}),
+        ...(body.dueAt === null ? { dueAt: null } : {}),
+        ...(body.dueDate === null ? { dueDate: null } : {}),
         ...(body.completed === true ? { completedAt: new Date() } : {}),
         ...(body.completed === false ? { completedAt: null } : {}),
       })

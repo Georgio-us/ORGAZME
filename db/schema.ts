@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   integer,
   index,
   jsonb,
@@ -87,6 +88,7 @@ export const events = pgTable(
       .defaultNow()
       .notNull(),
     dueAt: timestamp("due_at", { withTimezone: true }),
+    dueDate: date("due_date", { mode: "string" }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     source: text("source").notNull().default("manual"),
     createdAt: timestamp("created_at", { withTimezone: true })

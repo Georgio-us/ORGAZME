@@ -74,6 +74,7 @@ type TimelineItem = {
   date: string;
   tone: "blue" | "red" | "green" | "gray";
   dueAt?: string | null;
+  dueDate?: string | null;
   occurredAt?: string;
   completed?: boolean;
 };
@@ -93,6 +94,7 @@ type AIProposal = {
   clientId: string | null;
   clientRef: string | null;
   dueAt: string | null;
+  dueDate: string | null;
   clientDraft: {
     name: string;
     category: "active" | "potential";
@@ -229,12 +231,20 @@ export default function Home() {
         (item) =>
           !item.completed &&
           item.kind !== "Заметка" &&
-          Boolean(item.dueAt || item.occurredAt),
+          Boolean(item.dueAt || item.dueDate || item.occurredAt),
       )
       .sort((left, right) => {
-        const leftTime = new Date(left.dueAt ?? left.occurredAt ?? 0).getTime();
+        const leftTime = new Date(
+          left.dueAt ??
+            (left.dueDate
+              ? `${left.dueDate}T12:00:00`
+              : left.occurredAt ?? 0),
+        ).getTime();
         const rightTime = new Date(
-          right.dueAt ?? right.occurredAt ?? 0,
+          right.dueAt ??
+            (right.dueDate
+              ? `${right.dueDate}T12:00:00`
+              : right.occurredAt ?? 0),
         ).getTime();
         return leftTime - rightTime;
       });
@@ -243,7 +253,7 @@ export default function Home() {
   const todayAgenda = useMemo(() => {
     const today = dateKey(new Date());
     return agendaItems.filter((item) => {
-      const moment = item.dueAt ?? item.occurredAt;
+      const moment = item.dueAt ?? item.dueDate ?? item.occurredAt;
       return moment ? dateKey(moment) === today : false;
     });
   }, [agendaItems]);
@@ -253,7 +263,7 @@ export default function Home() {
       agendaItems.filter(
         (item) =>
           item.kind === "Задача" &&
-          item.dueAt &&
+          (item.dueAt || item.dueDate) &&
           item.tone === "red",
       ).length,
     [agendaItems],
@@ -2579,6 +2589,10 @@ function VoiceOverlay({
               dateStyle: "medium",
               timeStyle: "short",
             }).format(new Date(proposal.dueAt))
+        : proposal.dueDate
+          ? new Intl.DateTimeFormat("ru-RU", {
+              dateStyle: "medium",
+            }).format(new Date(`${proposal.dueDate}T12:00:00`))
           : proposal.details || `Контекст · ${scope}`,
     }));
     const hasBrokenDependencies = cards.some((card) => {

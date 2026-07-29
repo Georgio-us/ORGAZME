@@ -55,6 +55,11 @@ export async function POST(request: NextRequest) {
               title,
               details: String(item.details ?? "").trim() || null,
               dueAt: parseDate(item.dueAt),
+              dueDate:
+                typeof item.dueDate === "string" &&
+                /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate)
+                  ? item.dueDate
+                  : null,
               occurredAt: parseDate(item.occurredAt),
               completedAt: parseDate(item.completedAt),
             };
@@ -140,6 +145,7 @@ export async function POST(request: NextRequest) {
             title: event.title,
             details: event.details,
             dueAt: event.dueAt,
+            dueDate: event.dueDate,
             occurredAt: event.occurredAt ?? new Date(),
             completedAt: event.completedAt,
             source: eventSource,

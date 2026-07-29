@@ -56,24 +56,39 @@ export function serializeClient(client: typeof clients.$inferSelect) {
 
 export function serializeEvent(event: typeof events.$inferSelect) {
   const moment = event.dueAt ?? event.occurredAt;
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const dateLabel = event.dueDate
+    ? new Intl.DateTimeFormat("ru-RU", {
+        timeZone: "Europe/Madrid",
+        day: "numeric",
+        month: "long",
+      }).format(new Date(`${event.dueDate}T12:00:00+02:00`))
+    : new Intl.DateTimeFormat("ru-RU", {
+        timeZone: "Europe/Madrid",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(moment);
   return {
     id: event.id,
     kind: kindLabels[event.kind],
     title: event.title,
     detail: event.details ?? "",
-    date: new Intl.DateTimeFormat("ru-RU", {
-      timeZone: "Europe/Madrid",
-      day: "numeric",
-      month: "long",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(moment),
+    date: dateLabel,
     dueAt: event.dueAt?.toISOString() ?? null,
+    dueDate: event.dueDate,
     occurredAt: event.occurredAt.toISOString(),
     completed: Boolean(event.completedAt),
     tone: event.completedAt
       ? "green"
-      : event.dueAt && event.dueAt.getTime() < Date.now()
+      : (event.dueAt && event.dueAt.getTime() < Date.now()) ||
+          (event.dueDate && event.dueDate < today)
         ? "red"
         : event.kind === "contact"
           ? "blue"
@@ -146,6 +161,7 @@ export async function getAIWorkspaceContext() {
         details: event.details,
         occurredAt: event.occurredAt.toISOString(),
         dueAt: event.dueAt?.toISOString() ?? null,
+        dueDate: event.dueDate,
         completedAt: event.completedAt?.toISOString() ?? null,
       })),
   }));
